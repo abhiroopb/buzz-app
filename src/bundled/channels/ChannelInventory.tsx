@@ -1363,7 +1363,11 @@ export function ChannelInventory({
         />,
       );
     actions.push(
-      <ChannelCopyLinkMenuItem key="copy-link" channelId={channel.id} />,
+      <ChannelCopyLinkMenuItem
+        key="copy-link"
+        channelId={channel.id}
+        scope={scope}
+      />,
     );
     if (!surface && !channel.archived) {
       actions.push(
@@ -1598,7 +1602,11 @@ export function ChannelInventory({
       // A not-joined preview has no sidebar row to place, mute or mark read.
       if (channel.readOnly && channel.viewerRole !== "guest")
         return [
-          <ChannelCopyLinkMenuItem key="copy-link" channelId={channel.id} />,
+          <ChannelCopyLinkMenuItem
+            key="copy-link"
+            channelId={channel.id}
+            scope={scope}
+          />,
         ];
       const placement = sections.find((section) =>
         section.rows.some((row) => row.id === channel.id),
