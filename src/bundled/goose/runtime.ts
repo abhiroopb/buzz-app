@@ -977,11 +977,12 @@ export class GooseRuntime {
           conversation: conversation ?? null,
         });
         // Kept apart from the saved prompts, which drop old sessions.
-        if (wake && this.usageOn())
-          void standaloneSessions(this.agentStore, "goose", agent).add(
-            session,
-            wake,
-          );
+        if (wake) {
+          const record = standaloneSessions(this.agentStore, "goose", agent);
+          if (this.usageOn()) void record.add(session, wake);
+          // What was kept goes once past keeping, Usage on or off.
+          void record.expire();
+        }
       },
       tags: (conversation) => sessionTags(agent, conversation),
       onChange: () => this.notify(),

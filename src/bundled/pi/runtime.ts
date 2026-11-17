@@ -808,11 +808,10 @@ export class PiRuntime {
         conversation: number;
       }>("once", { agent: agent.key, text, request, ...turn });
       // Outside any conversation, so no place lists it for its usage.
-      if (this.usageOn())
-        void standaloneSessions(this.storage, "pi", agent.key).add(
-          String(conversation),
-          key,
-        );
+      const record = standaloneSessions(this.storage, "pi", agent.key);
+      if (this.usageOn()) void record.add(String(conversation), key);
+      // What was kept goes once past keeping, Usage on or off.
+      void record.expire();
       // A removed agent's storage is closed, and stays so.
       stop = () => {
         if (!entry.closed)

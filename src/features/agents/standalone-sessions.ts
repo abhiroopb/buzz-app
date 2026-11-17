@@ -9,7 +9,8 @@
 // Runtimes keep sessions here only while the Usage plugin is on (`usageOn`).
 //
 // Each day's starts are a value of their own, so a turn rewrites only its
-// day's value, and whole days past keeping are removed. Agent storage takes
+// day's value, and at each one-off turn, Usage on or off, whole days past
+// keeping are removed. Agent storage takes
 // 4 MiB a value: about 70,000 starts in one day, far more than one timer's
 // 1,440 at its shortest interval. A save past that fails and is logged.
 import { validTime } from "../agent-harness/acp/agent-sessions";
@@ -87,27 +88,35 @@ export function standaloneSessions(
      * of the turn that started it, when that was recorded. */
     list: () =>
       kept().map(([id, at, wake]) => (wake ? { id, at, wake } : { id, at })),
-    /** Records a one-off turn's new session, and the turn's key when given,
-     * then removes the days past keeping. A failed save is logged, never
-     * thrown, so the agent keeps working. */
+    /** Records a one-off turn's new session, and the turn's key when given.
+     * A failed save is logged, never thrown, so the agent keeps working. */
     async add(id: string, wake?: string) {
       try {
-        // Read, changed and written with no wait between, so adds never
-        // drop each other's sessions.
         if (kept().some(([found]) => found === id)) return;
         const at = now();
         const key = dayKey(type, agent, Math.floor(at / DAY));
+        // Read, changed and written with no wait between, so adds never
+        // drop each other's sessions.
         const sessions = read(storage.get(key));
         sessions.push(short(wake) ? [id, at, wake] : [id, at]);
-        const after = cutoff();
-        const past = days().filter(({ day }) => (day + 1) * DAY <= after);
         await storage.set(
           key,
           JSON.stringify({ version: 1, sessions } satisfies Stored),
         );
-        for (const { key } of past) await storage.set(key, null);
       } catch (error) {
         console.error("A one-off turn's session was not recorded", error);
+      }
+    },
+    /** Removes the agent's days past keeping: run at each one-off turn,
+     * whether or not Usage is on, so what was kept goes on time. A failure
+     * is logged, never thrown, so the agent keeps working. */
+    async expire() {
+      try {
+        const after = cutoff();
+        for (const { key, day } of days())
+          if ((day + 1) * DAY <= after) await storage.set(key, null);
+      } catch (error) {
+        console.error("Past one-off sessions were not removed", error);
       }
     },
   };

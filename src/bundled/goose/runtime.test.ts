@@ -14,7 +14,10 @@ import {
 import { RESUMED_PROMPT, TOP_LEVEL_PROMPT } from "../../buzz-mcp/prompt";
 import type { Agent, Delivery } from "../../features/agents/service";
 import { localStore, type AgentStore } from "../../features/agents/store";
-import { STANDALONE_PREFIX } from "../../features/agents/standalone-sessions";
+import {
+  STANDALONE_PREFIX,
+  standaloneSessions,
+} from "../../features/agents/standalone-sessions";
 import type { AgentProtection } from "../../features/agent-protection/service";
 import type { Host } from "../../features/host/service";
 import type { EventData, RelayEvent } from "../../features/relay/events";
@@ -1268,20 +1271,23 @@ describe("GooseRuntime", () => {
     });
   });
 
-  it("records no one-off session, nor its timer, while Usage is off", async () => {
+  it("records no one-off session, nor its timer, while Usage is off, and removes what was kept past keeping", async () => {
     const items = new Map<string, string>();
-    const { runOnce, runtime } = setup({
-      agentStore: localStore({
-        get length() {
-          return items.size;
-        },
-        key: (index: number) => [...items.keys()][index] ?? null,
-        getItem: (key: string) => items.get(key) ?? null,
-        setItem: (key: string, value: string) => void items.set(key, value),
-        removeItem: (key: string) => void items.delete(key),
-        clear: () => items.clear(),
-      }),
+    const agentStore = localStore({
+      get length() {
+        return items.size;
+      },
+      key: (index: number) => [...items.keys()][index] ?? null,
+      getItem: (key: string) => items.get(key) ?? null,
+      setItem: (key: string, value: string) => void items.set(key, value),
+      removeItem: (key: string) => void items.delete(key),
+      clear: () => items.clear(),
     });
+    await standaloneSessions(agentStore, "goose", self, () => 0).add(
+      "old",
+      "timer/daily",
+    );
+    const { runOnce, runtime } = setup({ agentStore });
     await runOnce("timer/daily", "Post the daily summary.");
     await flush(100);
     const [start] = runtime.prompts(self).sessions();

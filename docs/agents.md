@@ -1917,11 +1917,12 @@ app's record of the session it started says it is the agent's. That record is
 kept apart from saved prompts, for 32 days from the session's start, longer than
 Usage reads back, with no limit on how many sessions it holds. Each day's starts
 are saved as one value, and a day's value is removed once all of it is past
-keeping. The record is kept only while the Usage plugin is on (its
-settings card is registered), so a standalone turn run while Usage is off is not
-counted later; what is already kept is still read, and removing the agent removes
-it. The snapshot has no `channelId`, and a session from before that record was
-kept is not counted.
+keeping, by the agent's next standalone turn, whether or not Usage is on. A
+session is added to the record only while the Usage plugin is on (its settings
+card is registered), so a standalone turn run while Usage is off is not counted
+later; what is already kept is still read, and removing the agent removes it.
+The snapshot has no `channelId`, and a session from before that record was kept
+is not counted.
 
 Codex finds the agent's threads through app-server by the agent's name in their
 thread names, keeps those whose rollout's developer instructions name the agent's

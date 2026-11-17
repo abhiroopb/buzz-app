@@ -71,9 +71,13 @@ it("keeps a session for as long as Usage reads back, then drops its day", async 
   expect(sessions.list()).toEqual([]);
   // Its day's value stays until all of that day is past keeping.
   await sessions.add("late");
+  await sessions.expire();
   expect(storage.get(`${STANDALONE_PREFIX}pi:${AGENT}:0`)).not.toBeNull();
   now = (STANDALONE_DAYS + 1) * DAY;
   await sessions.add("new");
+  // Adding keeps it; only expiring removes it.
+  expect(storage.get(`${STANDALONE_PREFIX}pi:${AGENT}:0`)).not.toBeNull();
+  await sessions.expire();
   expect(storage.get(`${STANDALONE_PREFIX}pi:${AGENT}:0`)).toBeNull();
   expect(
     JSON.parse(
@@ -82,6 +86,19 @@ it("keeps a session for as long as Usage reads back, then drops its day", async 
     ),
   ).toEqual({ version: 1, sessions: [["new", now]] });
   expect(sessions.list().map(({ id }) => id)).toEqual(["late", "new"]);
+});
+
+it("expires the agent's days past keeping with nothing added", async () => {
+  const storage = memory();
+  let now = 0;
+  await standaloneSessions(storage, "pi", AGENT, () => now).add("a");
+  await standaloneSessions(storage, "pi", OTHER, () => now).add("o");
+  now = (STANDALONE_DAYS + 1) * DAY;
+  // As while Usage is off: no turn is recorded, and what is past still goes.
+  await standaloneSessions(storage, "pi", AGENT, () => now).expire();
+  expect(
+    storage.keys().filter((key) => key.startsWith(STANDALONE_PREFIX)),
+  ).toEqual([`${STANDALONE_PREFIX}pi:${OTHER}:0`]);
 });
 
 it("keeps every session in the window, however often turns run", async () => {

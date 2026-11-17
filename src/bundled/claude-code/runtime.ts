@@ -1657,11 +1657,12 @@ export class ClaudeRuntime {
         );
         // Its transcript names no conversation, so only this says it is the
         // agent's, for its usage; the saved prompts drop old sessions.
-        if (once && this.usageOn())
-          void standaloneSessions(this.storage, "claude-code", agent).add(
-            session,
-            once,
-          );
+        if (once) {
+          const record = standaloneSessions(this.storage, "claude-code", agent);
+          if (this.usageOn()) void record.add(session, once);
+          // What was kept goes once past keeping, Usage on or off.
+          void record.expire();
+        }
       },
       onChange: () => this.notify(),
       fingerprint: (key) =>

@@ -6,6 +6,7 @@ import {
 import type { AddedTool } from "../../buzz-mcp/session-tools";
 import { pubkeyOf } from "../../features/agents/membership";
 import { PROMPTS_PREFIX } from "../../features/agents/session-prompts";
+import { STANDALONE_PREFIX } from "../../features/agents/standalone-sessions";
 import { ownerReads } from "../../features/agents/reads";
 import type { MemoryEntry } from "../../features/agents/memory";
 import type {
@@ -1995,6 +1996,38 @@ it("records no standalone turn's conversation while Usage is off", async () => {
       false,
     ),
   ).toEqual([]);
+});
+
+it("removes what was kept past keeping at a standalone turn while Usage is off", async () => {
+  const old = `${STANDALONE_PREFIX}pi:${self}:0`;
+  const kept = new Map<string, string>([
+    [old, JSON.stringify({ version: 1, sessions: [["7", 1, "timer/t1"]] })],
+  ]);
+  vi.stubGlobal("localStorage", {
+    getItem: (key: string) => kept.get(key) ?? null,
+    setItem: (key: string, value: string) => void kept.set(key, value),
+    removeItem: (key: string) => void kept.delete(key),
+    key: (index: number) => [...kept.keys()][index] ?? null,
+    get length() {
+      return kept.size;
+    },
+  });
+  try {
+    const { runtime, runOnce } = setup({
+      wait: () => ({ status: "done", answer: 5, text: "" }),
+    });
+    runtime.sync([
+      { key: self, pubkey: self, config: DEFAULT_CONFIG },
+    ] as never);
+    await runOnce("timer/t1", "Run t1");
+    await vi.waitFor(() =>
+      expect(
+        [...kept.keys()].filter((key) => key.startsWith(STANDALONE_PREFIX)),
+      ).toEqual([]),
+    );
+  } finally {
+    vi.unstubAllGlobals();
+  }
 });
 
 it("reads a standalone turn begun before the cutoff by when it answered", async () => {

@@ -37,7 +37,10 @@ import {
   type AgentToolAuthority,
 } from "../../features/agents/tool-operation";
 import type { MemoryEntry } from "../../features/agents/memory";
-import { STANDALONE_PREFIX } from "../../features/agents/standalone-sessions";
+import {
+  STANDALONE_PREFIX,
+  standaloneSessions,
+} from "../../features/agents/standalone-sessions";
 import { CLAUDES, type FakeClaude, fakeSpawn, flush } from "./claude-testing";
 import { RESUMED_PROMPT, TOP_LEVEL_PROMPT } from "../../buzz-mcp/prompt";
 import { ClaudeRuntime, config, DEFAULT_CONFIG, modelName } from "./runtime";
@@ -2417,8 +2420,12 @@ it("runs a timer as a one-off turn that is never saved", async () => {
   expect(runtime.sessions(self)).toEqual([]);
 });
 
-it("records no one-off turn's session, nor its timer, while Usage is off", async () => {
+it("records no one-off turn's session, nor its timer, while Usage is off, and removes what was kept past keeping", async () => {
   const { deliver, claudes, runtime, storage } = setup();
+  await standaloneSessions(storage, "claude-code", self, () => 0).add(
+    "old",
+    "timer/daily",
+  );
   await deliver(timer("daily", "ops"));
   await flush(10);
   expect(claudes().some((process) => process.prompts.length)).toBe(true);
