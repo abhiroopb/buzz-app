@@ -2,6 +2,8 @@
 
 Estimates what your agents' Claude Code, Codex and goose sessions on this computer cost, from each harness's own session files: the cost a harness records, or else its token counts at each provider's published API prices, from [genai-prices](https://github.com/pydantic/genai-prices). It is a best-effort estimate, not your bill.
 
+A timer's or watch's turn leaves no conversation behind, so while Usage is on, this app keeps a record of the session each one starts, and which timer or watch it was. Turns run while Usage is off are not recorded, so they are not counted.
+
 ## Getting started
 
 1. Open **Settings → Usage**, under Plugins.

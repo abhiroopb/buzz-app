@@ -175,6 +175,9 @@ export class GooseRuntime {
   /** A failed turn's error as its report says it, such as where to fix
    * goose's provider key. */
   explain: (error: string) => string = (error) => error;
+  /** Whether the Usage plugin is on, asked as each one-off turn starts: only
+   * then is its session kept for Usage, with the key of the turn. */
+  usageOn: () => boolean = () => false;
 
   constructor(
     private readonly host: Host,
@@ -974,7 +977,7 @@ export class GooseRuntime {
           conversation: conversation ?? null,
         });
         // Kept apart from the saved prompts, which drop old sessions.
-        if (wake)
+        if (wake && this.usageOn())
           void standaloneSessions(this.agentStore, "goose", agent).add(
             session,
             wake,

@@ -14,6 +14,7 @@ import {
 import { RESUMED_PROMPT, TOP_LEVEL_PROMPT } from "../../buzz-mcp/prompt";
 import type { Agent, Delivery } from "../../features/agents/service";
 import { localStore, type AgentStore } from "../../features/agents/store";
+import { STANDALONE_PREFIX } from "../../features/agents/standalone-sessions";
 import type { AgentProtection } from "../../features/agent-protection/service";
 import type { Host } from "../../features/host/service";
 import type { EventData, RelayEvent } from "../../features/relay/events";
@@ -1267,6 +1268,38 @@ describe("GooseRuntime", () => {
     });
   });
 
+  it("records no one-off session, nor its timer, while Usage is off", async () => {
+    const items = new Map<string, string>();
+    const { runOnce, runtime } = setup({
+      agentStore: localStore({
+        get length() {
+          return items.size;
+        },
+        key: (index: number) => [...items.keys()][index] ?? null,
+        getItem: (key: string) => items.get(key) ?? null,
+        setItem: (key: string, value: string) => void items.set(key, value),
+        removeItem: (key: string) => void items.delete(key),
+        clear: () => items.clear(),
+      }),
+    });
+    await runOnce("timer/daily", "Post the daily summary.");
+    await flush(100);
+    const [start] = runtime.prompts(self).sessions();
+    expect(start).toBeDefined();
+    expect(
+      [...items.keys()].filter((key) => key.startsWith(STANDALONE_PREFIX)),
+    ).toEqual([]);
+    const usage = {
+      id: start?.id ?? "",
+      revision: "r",
+      gaps: [],
+      startedAt: 1,
+      lastAt: 2,
+      observations: [],
+    };
+    await expect(runtime.withWakes(self, [usage])).resolves.toEqual([usage]);
+  });
+
   it("tells which timer a one-off session was started for, and no conversation's", async () => {
     const items = new Map<string, string>();
     const { runOnce, deliver, runtime } = setup({
@@ -1281,6 +1314,7 @@ describe("GooseRuntime", () => {
         clear: () => items.clear(),
       }),
     });
+    runtime.usageOn = () => true;
     await runOnce("timer/daily", "Post the daily summary.");
     await deliver(message("1", "@Gander hello"));
     await flush(100);

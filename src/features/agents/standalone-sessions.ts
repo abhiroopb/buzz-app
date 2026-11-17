@@ -6,6 +6,7 @@
 // Usage reads back. Each also keeps the key of the turn that started it
 // (`timer/ID` or `watch/ID`), so Usage can say which routine spent it.
 // Nothing inside that window is dropped, however often the agent's turns run.
+// Runtimes keep sessions here only while the Usage plugin is on (`usageOn`).
 //
 // Each day's starts are a value of their own, so a turn rewrites only its
 // day's value, and whole days past keeping are removed. Agent storage takes
@@ -14,8 +15,16 @@
 import { validTime } from "../agent-harness/acp/agent-sessions";
 import type { AgentKey } from "./membership";
 import type { AgentStore } from "./store";
+import type { SettingsCards } from "../settings/service";
 
 export const STANDALONE_PREFIX = "buzz.standalone-sessions.v1:";
+/** The Usage plugin's settings card, registered only while Usage is on. */
+export const USAGE_CARD = "buzz.usage/usage";
+
+/** Whether Usage is on, asked as each one-off turn starts: a runtime keeps
+ * the turn's session here only then, and reads what is kept either way. */
+export const usageOn = (cards: Pick<SettingsCards, "has">) => () =>
+  cards.has(USAGE_CARD);
 /** Usage reads 30 days back, and a turn can answer a day after it started. */
 export const STANDALONE_DAYS = 32;
 const DAY = 86_400_000;

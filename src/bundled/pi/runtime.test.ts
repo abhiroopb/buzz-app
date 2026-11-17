@@ -1922,6 +1922,7 @@ it("runs a standalone turn in a one-off conversation", async () => {
 async function standaloneUsage(
   answered: (started: number) => number,
   since: (started: number) => number,
+  usageOn = true,
 ) {
   const started = Date.now();
   const answer = {
@@ -1956,6 +1957,7 @@ async function standaloneUsage(
       entries: conversation === 99 ? [answer] : [],
     }),
   });
+  runtime.usageOn = () => usageOn;
   try {
     runtime.sync([
       { key: self, pubkey: self, config: DEFAULT_CONFIG },
@@ -1983,6 +1985,16 @@ it("reads a standalone turn's conversation as the agent's usage, with no channel
   expect(sessions[0]).not.toHaveProperty("channelId");
   expect(sessions[0]?.wake).toBe("timer/t1");
   expect(sessions[0]?.observations).toHaveLength(1);
+});
+
+it("records no standalone turn's conversation while Usage is off", async () => {
+  expect(
+    await standaloneUsage(
+      (started) => started,
+      () => 0,
+      false,
+    ),
+  ).toEqual([]);
 });
 
 it("reads a standalone turn begun before the cutoff by when it answered", async () => {

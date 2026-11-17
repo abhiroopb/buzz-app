@@ -198,6 +198,9 @@ export class PiRuntime {
   private readonly listeners = new Set<() => void>();
   /** Each agent's working conversations, as last read, for a stable view. */
   private readonly views = new Map<AgentKey, readonly number[]>();
+  /** Whether the Usage plugin is on, asked as each one-off turn starts: only
+   * then is its conversation kept for Usage, with the key of the turn. */
+  usageOn: () => boolean = () => false;
   /** The agents of this type that run here now. */
   private running = new Set<AgentKey>();
   /** Agents with a protection binding, which never use the shared host. */
@@ -805,10 +808,11 @@ export class PiRuntime {
         conversation: number;
       }>("once", { agent: agent.key, text, request, ...turn });
       // Outside any conversation, so no place lists it for its usage.
-      void standaloneSessions(this.storage, "pi", agent.key).add(
-        String(conversation),
-        key,
-      );
+      if (this.usageOn())
+        void standaloneSessions(this.storage, "pi", agent.key).add(
+          String(conversation),
+          key,
+        );
       // A removed agent's storage is closed, and stays so.
       stop = () => {
         if (!entry.closed)

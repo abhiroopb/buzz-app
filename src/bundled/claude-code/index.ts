@@ -25,6 +25,7 @@ import { createTabs } from "./tabs";
 import { targetKey } from "../../features/navigation/targets";
 import type { ClaudeConnection } from "./ClaudeSettings";
 import { readUsage } from "./usage";
+import { usageOn } from "../../features/agents/standalone-sessions";
 
 export { TYPE_ID };
 /** How often Buzz's copy of Claude looks for a new release. */
@@ -140,6 +141,7 @@ export const apply: PluginModule["apply"] = (ctx) => {
     (key) => agents.inspectExecution(key),
     (key) => !!agents.executionBinding(key),
   );
+  runtime.usageOn = usageOn(ctx.settingsCards);
   /** A Claude agent is running, so Buzz's copy is needed; unknown until the
    * agents have loaded. */
   let needed: boolean | undefined;

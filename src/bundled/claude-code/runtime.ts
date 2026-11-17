@@ -275,6 +275,9 @@ export class ClaudeRuntime {
   /** A failed turn's error as its report says it, such as where to fix
    * Claude's credentials. */
   explain: (error: string) => string = (error) => error;
+  /** Whether the Usage plugin is on, asked as each one-off turn starts: only
+   * then is its session kept for Usage, with the key of the turn. */
+  usageOn: () => boolean = () => false;
 
   private executionKey(agent: AgentKey, conversation: string) {
     const scope = this.reads(agent)?.scope;
@@ -1654,7 +1657,7 @@ export class ClaudeRuntime {
         );
         // Its transcript names no conversation, so only this says it is the
         // agent's, for its usage; the saved prompts drop old sessions.
-        if (once)
+        if (once && this.usageOn())
           void standaloneSessions(this.storage, "claude-code", agent).add(
             session,
             once,
