@@ -239,7 +239,8 @@ export function stats(
       }
       agentSessions += 1;
       agentCost.include(sessionCost);
-      const { wake } = session;
+      // A watch's catch-up turn is that watch's work too.
+      const wake = session.wake?.replace(/^catch-up\//, "watch/");
       const id = wake === undefined ? "" : JSON.stringify([agent.pubkey, wake]);
       const routine = routines.get(id) ?? {
         ...(wake !== undefined && { agent, wake }),

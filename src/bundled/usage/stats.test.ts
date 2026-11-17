@@ -412,6 +412,35 @@ it("groups the period's cost by the timer or watch that started each session, th
   expect(result.cost.value).toBe(20);
 });
 
+it("counts a watch's catch-up turns under that watch", () => {
+  const pixel = agent("pixel");
+  const priced = (id: string, usd: number, wake: string) =>
+    session(id, [seen(today + 9 * HOUR, full(1), "acme-1", usd)], { wake });
+  const result = stats(
+    [
+      {
+        agent: pixel,
+        harness: "x/claude",
+        sessions: [
+          priced("live", 2, "watch/pulls"),
+          // What the watch matched while the agent was offline.
+          priced("missed", 5, "catch-up/pulls"),
+        ],
+      },
+    ],
+    now,
+    7,
+  );
+  expect(result.routines).toEqual([
+    {
+      agent: pixel,
+      wake: "watch/pulls",
+      cost: { value: 7, partial: false },
+      sessions: 2,
+    },
+  ]);
+});
+
 it("keeps each agent's routines apart when two agents name a timer alike", () => {
   const pixel = agent("pixel");
   const relay = agent("relay");
