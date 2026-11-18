@@ -1,4 +1,5 @@
 import { openVoice } from "./voice";
+import { Context } from "@deepseek-ai/cordis";
 import { matchFilters } from "nostr-tools/filter";
 import {
   createToolOperation,
@@ -17,6 +18,8 @@ import {
   conversationKey,
 } from "../../features/agents/conversation-folders";
 import { pubkeyOf } from "../../features/agents/membership";
+import { createSessionAdmissions } from "../../features/agents/session-admission";
+import { memoryStorage } from "../../features/agents/test-fakes";
 import { ownerReads } from "../../features/agents/reads";
 import {
   localStore,
@@ -706,6 +709,98 @@ function fixture(
     store,
   };
 }
+it("keeps Codex idle until a marked reply can route in the runner's community", async () => {
+  const f = fixture();
+  const signer = keypair();
+  const communityOrigin = "https://background.example.org";
+  const event = eventDto(
+    signed(signer, {
+      kind: 9,
+      content: "Continue the invocation",
+      tags: [
+        ["h", "channel"],
+        ["e", root, "", "reply"],
+        ["p", pubkey],
+        ["buzz:invocation-intent", "1", pubkey],
+      ],
+    }),
+  );
+  const ctx = new Context();
+  ctx.provide("pluginStatus", {
+    isActive: () => true,
+    subscribe: () => () => {},
+  });
+  const admissions = createSessionAdmissions(ctx, memoryStorage());
+  let reachableOrigin = "https://selected.example.org";
+  const startedRouting = deferred<void>();
+  const confirmedBinding = deferred<{ root: string; parent: string }>();
+  const route = vi.fn(() => {
+    startedRouting.resolve();
+    return confirmedBinding.promise;
+  });
+  const routeResult = { root, parent: "d".repeat(64) };
+  const base = f.delivery(event.content);
+  const delivery: Delivery = {
+    ...base,
+    agent: { ...base.agent, owner: signer.pubkey },
+    trigger: { type: "mention", event },
+    routeConversation: (placement) =>
+      admissions.route({
+        ...placement,
+        agent: pubkey,
+        owner: signer.pubkey,
+        harness: "example/codex",
+        communityOrigin,
+        invocationId: event.id,
+        event,
+        resumed: false,
+        signal: base.signal,
+      }),
+  };
+  try {
+    await ctx
+      .extend({ pluginOwner: { id: "example", revision: "one" } })
+      .plugin((plugin) => {
+        admissions.register(plugin, {
+          id: "tasks",
+          ready: async () => {},
+          matches: (input) => input.communityOrigin === reachableOrigin,
+          invocationIntent: () => true,
+          route,
+          prepare: async () => undefined,
+        });
+      })
+      .await();
+    await expect(f.runtime.run(delivery)).rejects.toThrow(
+      "invocation router is unavailable",
+    );
+    expect(f.starts()).toHaveLength(0);
+
+    reachableOrigin = communityOrigin;
+    const retry = f.runtime.run(delivery);
+    const admitted = expect(retry).resolves.toBeUndefined();
+    try {
+      await Promise.race([
+        startedRouting.promise,
+        retry.then(() => {
+          throw new Error("The retry skipped invocation routing");
+        }),
+      ]);
+      expect(f.starts()).toHaveLength(0);
+    } finally {
+      confirmedBinding.resolve(routeResult);
+    }
+    await admitted;
+    await vi.waitFor(() => expect(f.starts()).toHaveLength(1));
+    expect(f.runtime.sessions(pubkey)).toMatchObject([
+      { key: JSON.stringify(["channel", routeResult.parent]) },
+    ]);
+    await f.complete();
+  } finally {
+    await ctx.fiber.dispose();
+  }
+});
+
 it("hands over promptly and runs conversations independently on one server", async () => {
   const f = fixture();
   await f.runtime.run({

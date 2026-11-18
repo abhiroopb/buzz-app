@@ -1,6 +1,8 @@
 import { Context } from "@deepseek-ai/cordis";
 import { afterEach, expect, it, vi } from "vitest";
 import { SessionControls } from "../agent-harness/session-control";
+import { eventDto } from "../relay/events";
+import { keypair, message } from "../relay/testing";
 import type { AgentKey } from "./membership";
 import {
   createSessionAdmissions,
@@ -20,6 +22,7 @@ const request = (invocationId: string) => ({
   agent,
   owner: "c".repeat(64),
   harness: "example/native",
+  communityOrigin: "https://relay.example.org",
   source,
   conversation: source,
   invocationId,
@@ -211,3 +214,39 @@ it("does not save failed routing or move an invocation admitted before routing",
   expect(await f.admissions.route(request("legacy"))).toBeUndefined();
   expect(route).toHaveBeenCalledTimes(2);
 });
+
+it.each([
+  ["unmarked", []],
+  ["unknown version", [["buzz:invocation-intent", "2", agent]]],
+  ["wrong recipient", [["buzz:invocation-intent", "1", "e".repeat(64)]]],
+  ["extra field", [["buzz:invocation-intent", "1", agent, "extra"]]],
+] as const)(
+  "keeps native routing for an unmatched %s reply",
+  async (_name, tags) => {
+    const owner = keypair();
+    const route = vi.fn(async () => ({
+      root: source.root,
+      parent: "d".repeat(64),
+    }));
+    const f = await setup({
+      route,
+      matches: () => false,
+      invocationIntent: () => true,
+    });
+    const event = eventDto(
+      message(owner, source.channelId, "Reply", 1700000001, [
+        ["e", source.root, "", "reply"],
+        ["p", agent],
+        ...tags.map((tag) => [...tag]),
+      ]),
+    );
+    expect(
+      await f.admissions.route({
+        ...request(event.id),
+        owner: owner.pubkey,
+        event,
+      }),
+    ).toBeUndefined();
+    expect(route).not.toHaveBeenCalled();
+  },
+);
