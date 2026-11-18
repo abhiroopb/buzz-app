@@ -28,7 +28,7 @@ import {
   workflowOf,
 } from "../../features/agents/owner-attestation";
 import type { TranscriptTurn } from "../../features/agents/activity-transcript";
-import type { AgentReads } from "../../features/agents/reads";
+import { type AgentReads, workflowMarked } from "../../features/agents/reads";
 import { localStore, type AgentStore } from "../../features/agents/store";
 import {
   agentFolders,
@@ -142,6 +142,9 @@ export type SavedConversation = Conversation &
     at: number;
   };
 
+/** A little over the host's grace (`STOP_GRACE`) before it kills a stopped
+ * process. */
+const STOP_WAIT_MS = 5_000;
 const CONVERSATION_READ_TIMEOUT_MS = 4_000;
 const CHAT = [9, 40002];
 
@@ -199,6 +202,9 @@ const listing = (added: readonly AddedTool[]): Listing => ({
 /** How long a session start waits for the agent's recent notes. */
 const NOTES_WAIT_MS = 2_000;
 
+/** A turn's run returns once Claude has it, so this bounds only the hand-over. */
+export const HANDOVER_MS = 2 * 60_000;
+
 export class ClaudeRuntime {
   private disposed = false;
   private readonly confirmedRemote = new Set<AgentKey>();
@@ -235,6 +241,7 @@ export class ClaudeRuntime {
   private credentials = 0;
   /** One process started ahead of need, for any agent's next new conversation. */
   private readonly spare = new Spare(
+    // Started ahead of need, it never stops a conversation to make room.
     (id, options) => this.spawn(id, options),
     (_conversation, message) =>
       respond(undefined, {}, message, this.added(), listing(this.added())),
@@ -270,6 +277,13 @@ export class ClaudeRuntime {
     private readonly bound: (agent: AgentKey) => boolean = () => false,
     private readonly target?: AgentExecution,
     private readonly targetKey?: string,
+    /** The agent's reads once its community is ready, for a workflow's
+     * mention that arrived while it reconnects; rejects when `signal` aborts. */
+    private readonly readyReads?: (
+      agent: AgentHandle,
+      signal: AbortSignal,
+      channelId: string | undefined,
+    ) => Promise<AgentReads | undefined>,
   ) {}
 
   /** A failed turn's error as its report says it, such as where to fix
@@ -425,6 +439,7 @@ export class ClaudeRuntime {
           undefined,
           execution,
           saved.key,
+          this.readyReads,
         );
         runtime.subscribe(() => this.notify());
         this.remote.set(key, { agent, conversation, runtime, execution });
@@ -459,6 +474,38 @@ export class ClaudeRuntime {
     const { spawn } = this.host;
     if (!spawn) throw new Error("Claude agents run only in the desktop app");
     return spawn;
+  }
+
+  /** Makes a place when the host already runs all the processes it allows,
+   * which every plugin's processes share: stops the spare, else the
+   * conversation process of any agent that has been idle longest, and waits
+   * for it to exit, or until the host has had time to kill it. False when
+   * neither is there to stop. Idle processes
+   * would stop on their own after `IDLE_MS`; until then they hold places a
+   * new conversation needs. */
+  async room() {
+    // The spare, started ahead of need, goes before any conversation's. Both
+    // are chosen now: a wait that runs out never stops another later.
+    let stopping = this.spare.free();
+    if (!stopping) {
+      let idlest: ReturnType<AgentSessions["idlest"]>;
+      for (const entry of this.agents.values()) {
+        const candidate = entry.sessions.idlest();
+        if (candidate && (!idlest || candidate.used < idlest.used))
+          idlest = candidate;
+      }
+      if (!idlest) return false;
+      stopping = idlest.stop();
+    }
+    // A descendant holding its output can keep it from ever reporting exit;
+    // its place may still be held, so the caller then asks again.
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    await Promise.race([
+      stopping,
+      new Promise((done) => (timer = setTimeout(done, STOP_WAIT_MS))),
+    ]);
+    clearTimeout(timer);
+    return true;
   }
 
   /** Brings the runtime in line with this type's agents: changed settings
@@ -976,6 +1023,7 @@ export class ClaudeRuntime {
       signal,
       step,
       acknowledged,
+      accepted,
       superseded,
       interruptible,
       named,
@@ -997,10 +1045,25 @@ export class ClaudeRuntime {
     const wake = trigger.type !== "mention" ? trigger : undefined;
     // Claude runs commands as you; mentions need owner or delegated authority.
     if (trigger.type === "mention") {
+      // A workflow's mention waits out a reconnect; the check below decides.
+      const ready = workflowMarked(trigger.event, agent.owner)
+        ? this.readyReads
+        : undefined;
+      const reads = ready
+        ? await ready(
+            agent,
+            signal,
+            channelId ?? trigger.event.tags.find((tag) => tag[0] === "h")?.[1],
+          )
+        : this.reads(agent.key);
+      if (ready) {
+        signal.throwIfAborted();
+        if (current && !current()) return ignored?.();
+      }
       const authority = await mentionAuthority(
         trigger.event,
         agent.owner,
-        workflowOf(this.reads(agent.key), agent.pubkey),
+        workflowOf(reads, agent.pubkey),
       );
       if (authority !== "owner") return ignored?.(authority);
     }
@@ -1063,6 +1126,7 @@ export class ClaudeRuntime {
       const handoff = this.controls.deliver(
         `${agent.key}/${key}`,
         async (deferred) => {
+          const handover = deferred && AbortSignal.timeout(HANDOVER_MS);
           if (this.agents.get(agent.key) !== entry) return;
           const admitted = await admission(deferred);
           session = admitted?.session ?? session;
@@ -1073,9 +1137,14 @@ export class ClaudeRuntime {
             key,
             deferred ? undefined : signal,
           );
-          const accepted = deferred ? runtime.target?.signal : signal;
-          if (!accepted)
+          const lifetime = deferred ? runtime.target?.signal : signal;
+          if (!lifetime)
             throw new Error("The remote Claude lifetime is unavailable");
+          // Held work's deadline passed while it waited, so its hand-over
+          // gets its own from now; the turn itself outlives it.
+          const accepted = handover
+            ? AbortSignal.any([lifetime, handover])
+            : lifetime;
           await runtime.run({
             ...delivery,
             ...(session ? { session } : {}),
@@ -1136,6 +1205,8 @@ export class ClaudeRuntime {
         const wait = prior && (same ? prior.handed : prior.settled);
         let delivered!: Promise<Settled>;
         let interrupted = false;
+        // Its idle process stays while the turn is prepared.
+        const arriving = entry.sessions.incoming(key);
         const handed = (async () => {
           await wait;
           if (interrupted) {
@@ -1209,6 +1280,7 @@ export class ClaudeRuntime {
               : (threadReference(event)?.rootId ?? event.id),
             ...(step ? { step } : {}),
             ...(acknowledged ? { acknowledged } : {}),
+            ...(accepted ? { accepted } : {}),
             ...(superseded ? { superseded } : {}),
             pick: {
               ...(model ? { model } : {}),
@@ -1224,6 +1296,8 @@ export class ClaudeRuntime {
             () => undefined,
           );
         })();
+        // `deliver` marks it from then on.
+        void handed.then(arriving, arriving);
         const done = handed.then(
           () => delivered,
           (error: unknown): Settled => ({ ok: false, error: String(error) }),
@@ -1629,6 +1703,7 @@ export class ClaudeRuntime {
     const saved = this.savedSessions(agent);
     entry.sessions = new AgentSessions({
       spawn: (id, options) => this.spawn(id, options),
+      room: () => this.room(),
       ...(!this.target ? { spare: this.spare } : {}),
       strictResume: !!this.target,
       store: {

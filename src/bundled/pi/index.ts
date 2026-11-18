@@ -6,12 +6,15 @@ import { usageOn } from "../../features/agents/standalone-sessions";
 // conversation. Pi answers with the in-process Buzz tools.
 import { isTauri } from "@tauri-apps/api/core";
 import { pubkeyOf } from "../../features/agents/membership";
-import { ownerReads } from "../../features/agents/reads";
+import { ownerReads, readyOwnerReads } from "../../features/agents/reads";
 import { repositoriesContext } from "../../features/communities/repositories";
 import type { PluginModule } from "../../plugins/api";
 import { PiLogoIcon } from "../../shared/design-system/icons";
 import { type Config, config, DEFAULT_CONFIG, PiRuntime } from "./runtime";
 import { createTabs } from "./tabs";
+import { upstreamFor } from "../../features/agents/gateway/route";
+import { readModelSettings } from "../../features/agents/model-settings";
+import { GATEWAY_SEAM, HARNESS } from "./gateway";
 
 export const TYPE_ID = "pi";
 /** A turn's run returns once Pi has it, so this bounds only the hand-over,
@@ -49,6 +52,11 @@ export const apply: PluginModule["apply"] = (ctx) => {
     },
     (key, listener) => agents.relay(key)?.subscribe(listener) ?? (() => {}),
     agents.storage,
+    // Without a Pi upstream in this build, every agent keeps its own
+    // providers, as the runner sends every turn without the gateway.
+    upstreamFor(HARNESS) ? GATEWAY_SEAM : undefined,
+    (agent, signal, channelId) =>
+      readyOwnerReads(agents.relay(agent.key), agent, signal, channelId),
   );
   runtime.usageOn = usageOn(ctx.settingsCards);
   ctx.agentProtection.registerModels({
@@ -90,6 +98,7 @@ export const apply: PluginModule["apply"] = (ctx) => {
   }
 
   agents.register<Config>({
+    supportsGuardedWake: true,
     id: TYPE_ID,
     hooks: { events: ["beforeTool", "afterTool"] },
     retire: (pubkey) => runtime.retire(pubkey),
@@ -99,6 +108,8 @@ export const apply: PluginModule["apply"] = (ctx) => {
     description:
       "Pi on this computer, with any provider Pi supports. Each thread it is mentioned in is one continuing conversation.",
     defaults: () => ({ config: DEFAULT_CONFIG }),
+    readModelSettings: (saved) =>
+      readModelSettings(config(saved), { provider: true }),
     Create,
     CreateModel,
     createModelReportsReadiness: true,
@@ -168,5 +179,8 @@ export const apply: PluginModule["apply"] = (ctx) => {
       return runtime.workspaceFile(agent, path);
     },
     timeoutMs: HANDOVER_MS,
+    // Memberships whose gateway enables Pi route through it; none do while
+    // this build has no gateway descriptor.
+    gateway: { harness: HARNESS },
   });
 };
