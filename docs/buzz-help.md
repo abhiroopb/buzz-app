@@ -1273,12 +1273,15 @@ default Huddle voice.
   thread's context separate. **One session per channel** lets threads in the
   same channel share context. **One session per community** shares one session
   across that agent's channels, threads, DMs, Solo chats and huddles in the same
-  community. A new message can reach the agent while it's working. The agent
-  can reply in that conversation and continue the earlier work. Attention and
-  plugin wakes with a destination can also join the running turn. Wakes without
-  a destination and requests that need a new turn, such as a model change, wait
-  in order. New and Compact affect that shared session
-  from any conversation. Community scope does not grant additional channel
+  community. Within any session scope, a new message or an addressed Attention
+  or plugin wake can join a compatible running turn. The agent can reply to
+  each request in its own conversation. A model or effort change applies
+  right away where the harness can change a running turn, and otherwise
+  waits in order for a new turn, as it does in community scope. A turn
+  started in a Solo chat that is shared while it runs finishes under the
+  Solo chat's posting rules, and the shared chat's next request waits for
+  it. New and Compact affect the community
+  session from any conversation. Community scope does not grant additional channel
   access or share context with another community. Under the thread and channel
   choices, each DM, huddle room and Solo chat remains its own continuing
   conversation. Session lifetime and restoration still depend on the harness.

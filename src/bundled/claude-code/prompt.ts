@@ -12,6 +12,8 @@ import {
 import { composeBase } from "../../features/agent-harness/sections/compose";
 import {
   type AuthorNames,
+  CONTENT_LIMIT,
+  contentFields,
   eventBody,
   quoted,
   withNames,
@@ -23,8 +25,6 @@ export type Scope =
   import("../../features/agent-harness/session-scope").SessionScope;
 /** Messages of thread context shown with a turn, newest kept. */
 export const CONTEXT_LIMIT = 12;
-/** Characters of each context message shown. */
-const CONTENT_LIMIT = 4000;
 
 const section = (tag: string, body: string, attributes = "") =>
   `<${tag}${attributes}>\n${body.trim()}\n</${tag}>`;
@@ -126,7 +126,7 @@ export function turnPrompt(input: TurnInput) {
     input.scope === "community"
       ? `IMPORTANT: Pass each reply's channel as \`channel\` to \`send\`. ${input.wake ? "Leave out the request field for this wake." : "Pass the triggering message ID as `request`."} For this request use channel "${channel.id}". ${input.topLevel ? "Leave out the reply field to post at the top level." : `Use "${root}" as the reply field to post in its thread.`} You can answer one request and continue working on another.`
       : input.topLevel
-        ? `IMPORTANT: ${input.channelLevel ? CHANNEL_LEVEL_PROMPT : TOP_LEVEL_PROMPT}`
+        ? `IMPORTANT: ${input.channelLevel ? CHANNEL_LEVEL_PROMPT : TOP_LEVEL_PROMPT} Pass the channel explicitly to \`send\` when handling multiple requests.`
         : shared
           ? `IMPORTANT: For ordinary replies in this turn, pass \`reply: "${root}"\` to \`send\` so the conversation stays threaded. Do NOT reply into any other (older) thread. If the human explicitly asks for a channel-root, top-level, or broadcast post, pass \`channel\` explicitly and leave out \`reply\`.`
           : thread
@@ -190,7 +190,7 @@ export function turnPrompt(input: TurnInput) {
                 id: message.id,
                 pubkey,
                 created_at: message.created_at,
-                content: message.content.slice(0, CONTENT_LIMIT),
+                ...contentFields(message.content, message.tags),
               },
               input.names?.(pubkey),
             );

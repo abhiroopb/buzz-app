@@ -124,21 +124,21 @@ export function turnInput(
     ? "new-message-arrived-while-you-were-working"
     : "buzz-event";
   const body = wake ? wakeSection(wake) : eventBody(event, text, names);
+  const replyTo = conversation.sourceRoot ? conversation.root : rootOf(event);
   const routing = conversation.topLevel
     ? { posting: "top-level" }
     : {
         session_thread: conversation.root,
-        reply_to: conversation.sourceRoot ? conversation.root : rootOf(event),
+        reply_to: replyTo,
         ...(conversation.sourceRoot
           ? { source_thread: conversation.sourceRoot }
           : {}),
       };
-  const replyGuidance =
-    steering && conversation.community
-      ? wake
-        ? `When posting about this wake, pass channel "${conversation.channelId}" explicitly to send${conversation.topLevel ? " and omit reply" : ` and use reply "${conversation.sourceRoot ? conversation.root : rootOf(event)}"`}. Leave out the request field for the wake. You can continue working on other requests.`
-        : "When answering requests from different conversations, use Buzz send with the request ID for each reply. You can answer one request and continue working on another."
-      : "";
+  const replyGuidance = steering
+    ? wake
+      ? `When posting about this wake, pass channel "${conversation.channelId}" explicitly to send${conversation.topLevel ? " and omit reply" : ` and use reply "${replyTo}"`}. Leave out the request field for the wake. You can continue working on other requests.`
+      : "When answering requests from different conversations, use Buzz send with the request ID for each reply. You can answer one request and continue working on another."
+    : "";
   return `<context>\n${quoted({ agent, channel_id: conversation.channelId, channel_name: conversation.name, session_scope: conversation.community ? "community" : conversation.root ? "thread" : "channel", ...routing })}\n</context>\n${conversation.topLevel ? `${conversation.threadReplies ? CHANNEL_LEVEL_PROMPT : TOP_LEVEL_PROMPT}\n` : ""}${wake ? "" : `${MENTION_PROMPT}\n`}${wake && !steering ? body : `<${section}>\n${body}\n</${section}>`}${replyGuidance ? `\n\n${replyGuidance}` : ""}${note ? `\n\n${note}` : ""}`;
 }
 /** The readable part of a conversation's thread name; earlier versions used
