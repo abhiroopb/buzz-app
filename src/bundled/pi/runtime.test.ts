@@ -6,7 +6,10 @@ import {
 } from "../../features/agents/activity-transcript";
 import type { AddedTool } from "../../buzz-mcp/session-tools";
 import { pubkeyOf } from "../../features/agents/membership";
-import { PROMPTS_PREFIX } from "../../features/agents/session-prompts";
+import {
+  PROMPTS_PREFIX,
+  sessionPrompts,
+} from "../../features/agents/session-prompts";
 import { STANDALONE_PREFIX } from "../../features/agents/standalone-sessions";
 import { type AgentReads, ownerReads } from "../../features/agents/reads";
 import type { MemoryEntry } from "../../features/agents/memory";
@@ -2097,9 +2100,19 @@ async function standaloneUsage(
   const kept = (runtime as unknown as { storage: MemoryStorage }).storage;
   runtime.sync([{ key: self, pubkey: self, config: DEFAULT_CONFIG }] as never);
   await runOnce("timer/t1", "Run t1");
+  // Pi keeps no prompt for a one-off turn, so one is kept here as a session
+  // started by the agent would be, for the step below to push out.
+  const prompts = sessionPrompts(kept, "pi", self);
+  await prompts.save("99", [{ label: "", text: "Run t1" }], {
+    at: started,
+    title: "",
+    conversation: null,
+  });
+  expect(prompts.sessions().map(({ id }) => id)).toEqual(["99"]);
   // Later sessions push every saved prompt out; the turn stays the agent's.
   for (const key of kept.keys())
     if (key.startsWith(PROMPTS_PREFIX)) await kept.set(key, null);
+  expect(prompts.sessions()).toEqual([]);
   return await runtime.usage(
     self,
     since(started),
