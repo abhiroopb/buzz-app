@@ -2323,10 +2323,9 @@ export class CodexRuntime {
         if (deferred) entry.abort.signal.throwIfAborted();
         else delivery.signal.throwIfAborted();
         const admitted = await admission(deferred);
-        if (reserved && delivery.signal.aborted) {
-          request.current = () => false;
+        if (reserved && request.current?.() === false) {
           entry.waiting.delete(request);
-          request.answered(true);
+          request.answered();
           return;
         }
         if (admitted) {

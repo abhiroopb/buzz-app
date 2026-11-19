@@ -1259,7 +1259,6 @@ export class ClaudeRuntime {
     let delivered!: Promise<Settled>;
     let interrupted = false;
     let submitted = false;
-    const stopped = () => interrupted || (reserved && signal.aborted);
     // Keep an idle process available until delivery takes over.
     const arriving = entry.sessions.incoming(key);
     const handoff = this.controls.deliver(
@@ -1291,7 +1290,7 @@ export class ClaudeRuntime {
             topLevel,
             fresh,
             solo,
-            () => !stopped() && (!current || current()),
+            () => !interrupted && (!current || current()),
             route,
           );
           acceptProject = turn.acceptProject;
@@ -1315,12 +1314,12 @@ export class ClaudeRuntime {
         // the other policy waits for the conversation's turns to settle rather
         // than steering into them and changing their tools' context.
         await wait;
-        if (stopped()) {
+        if (interrupted) {
           delivered = Promise.resolve({ ok: true });
           return;
         }
         const { text: prepared, contextRoot } = await prompt(false);
-        if (stopped()) {
+        if (interrupted) {
           delivered = Promise.resolve({ ok: true });
           return;
         }
@@ -1358,7 +1357,7 @@ export class ClaudeRuntime {
         };
         submitted = true;
         delivered = entry.sessions.deliver(key, text, event.created_at, {
-          current: () => !stopped() && (!current || current()),
+          current: () => !interrupted && (!current || current()),
           ...(wake
             ? {
                 refresh: async (fresh = false) => {
