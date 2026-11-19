@@ -172,6 +172,7 @@ it("shares a Claude agent's model as the claude runtime and imports it back", ()
     },
     effect: vi.fn(),
   } as never);
+  expect(type?.skillFolders).toEqual(["~/.claude/skills"]);
   const shared = type?.exportShared?.({ model: "opus", workspace: "/private" });
   expect(shared).toEqual({ runtime: "claude", model: "opus" });
   expect(type?.importShared?.(shared ?? { model: "" })).toMatchObject({
