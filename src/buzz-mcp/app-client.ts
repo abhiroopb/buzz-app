@@ -73,6 +73,13 @@ export function appClient(
   const signal = options.callSignal ?? options.signal;
   const client: BuzzClient = {
     ...(signal ? { signal } : {}),
+    ...(agent.settle
+      ? {
+          settle: async () => {
+            await agent.settle?.(signal ?? new AbortController().signal);
+          },
+        }
+      : {}),
     ...(agent.protection
       ? {
           protect: async (
