@@ -277,18 +277,19 @@ test("a fully visible incoming row stays quiet without publishing read intent", 
 }) => {
   // Own the reader's timers from startup so pausing also holds existing dwell.
   await page.clock.install();
-  const following = finalizeEvent(
+  // Reading the seed row must leave the newer incoming mention unread.
+  const earlier = finalizeEvent(
     {
       kind: 9,
-      content: "Following row",
-      created_at: Math.floor(Date.now() / 1000) + 20,
+      content: "Earlier row",
+      created_at: Math.floor(Date.now() / 1000) - 20,
       tags: [["h", "beta"]],
     },
     generateSecretKey(),
   );
   // Keep both rows wholly inside the viewport. A long virtualized history can
   // leave its last row fractionally clipped in WebKit, which is not "viewing".
-  app.histories.set("primary/beta", [following]);
+  app.histories.set("primary/beta", [earlier]);
   await ready(page, app);
   await page.evaluate(
     (viewer) =>
@@ -315,7 +316,7 @@ test("a fully visible incoming row stays quiet without publishing read intent", 
         (id) =>
           window.fixtureRelay.snapshot().session.unread.attention("beta", id)
             .viewing,
-        following.id,
+        earlier.id,
       ),
     )
     .toBe(true);
