@@ -1869,8 +1869,13 @@ export function SearchResults({
           !!message.agentEnvelope ||
           !!profiles.get(message.authorId)?.isAgent ||
           knownAgents.has(message.authorId),
+        // Currently joined, as the joined-channel suggestions read it: a
+        // roster kept after leaving doesn't count.
         member:
-          !!session.viewer && !!channel?.members?.includes(session.viewer),
+          !!channel &&
+          (!channel.readOnly ||
+            !!channel.cached ||
+            channel.viewerRole === "guest"),
       };
     },
     held: movedFor === searchKey,

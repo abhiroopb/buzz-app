@@ -11,6 +11,7 @@ import {
   scriptedTransport,
   signed,
 } from "../../features/relay/testing";
+import { eventDto } from "../../features/relay/events";
 import { useSearchMessages } from "./useSearchMessages";
 
 it.each([
@@ -192,7 +193,7 @@ it.each([
   },
 );
 
-it("marks hits that tag the viewer, as mentions and replies to them do", async () => {
+it("marks hits that mention the viewer, as unread counts them", async () => {
   const viewer = keypair();
   const other = keypair();
   const relay = keypair();
@@ -203,6 +204,7 @@ it("marks hits that tag the viewer, as mentions and replies to them do", async (
   ];
   const owner = createRelaySession({
     ...wire.transport,
+    archiveAuthority: relay.pubkey,
     query(filters, signal) {
       if (filters.some((filter) => filter.kinds?.includes(9)))
         return wire.transport.query(filters, signal);
@@ -213,6 +215,16 @@ it("marks hits that tag the viewer, as mentions and replies to them do", async (
       );
     },
   });
+  // The relay p-tags a workflow's owner; only its explicit target mentions.
+  const workflow = (text: string, created_at: number, mention: boolean) =>
+    eventDto(
+      message(relay, "crew", text, created_at, [
+        ["buzz:workflow", "true"],
+        ["buzz:workflow-owner", viewer.pubkey],
+        ["p", viewer.pubkey],
+        ...(mention ? [["buzz:workflow-mention", viewer.pubkey]] : []),
+      ]),
+    );
   try {
     owner.session.channels.ensureList();
     await waitFor(() =>
@@ -226,25 +238,32 @@ it("marks hits that tag the viewer, as mentions and replies to them do", async (
       wire
         .next()
         .respond([
-          message(other, "crew", "deploy tagged", 1700000002, [
+          message(other, "crew", "deploy tagged", 1700000005, [
             ["p", viewer.pubkey],
           ]),
-          message(other, "crew", "deploy other", 1700000001, [
+          message(other, "crew", "deploy other", 1700000004, [
             ["p", other.pubkey],
           ]),
-          message(other, "crew", "deploy untagged", 1700000000),
+          message(other, "crew", "deploy untagged", 1700000003),
+          workflow("deploy owner attribution", 1700000002, false),
+          workflow("deploy workflow mention", 1700000001, true),
         ]),
     );
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(
-      result.current.messages.map(({ preview, toViewer }) => [
-        preview,
-        toViewer,
-      ]),
+      result.current.messages.map(
+        ({ preview, mentionsViewer, workflowOwnerId }) => [
+          preview,
+          mentionsViewer,
+          workflowOwnerId,
+        ],
+      ),
     ).toEqual([
-      ["deploy tagged", true],
-      ["deploy other", undefined],
-      ["deploy untagged", undefined],
+      ["deploy tagged", true, undefined],
+      ["deploy other", undefined, undefined],
+      ["deploy untagged", undefined, undefined],
+      ["deploy owner attribution", undefined, viewer.pubkey],
+      ["deploy workflow mention", true, viewer.pubkey],
     ]);
   } finally {
     cleanup();

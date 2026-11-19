@@ -1630,16 +1630,19 @@ it.each([
   },
 );
 
-it("tells the reranker which hits agents wrote, whoever owns the agent", async () => {
+it("tells the reranker which hits agents wrote, whoever owns the agent, and where the searcher is a member now", async () => {
   vi.useFakeTimers();
   const relay = keypair(),
     viewer = keypair(),
     colleague = keypair(),
     colleagueAgent = keypair(),
-    envelopeAgent = keypair();
+    envelopeAgent = keypair(),
+    ownAgent = keypair();
   const discovery = [
     metadata(relay, "crew", "crew"),
     roster(relay, "crew", [viewer.pubkey, colleague.pubkey]),
+    metadata(relay, "left", "left"),
+    roster(relay, "left", [viewer.pubkey]),
     profile(colleague, { name: "Colleague" }),
     await ownedProfile(colleagueAgent, colleague, "Helper"),
   ];
@@ -1648,14 +1651,15 @@ it("tells the reranker which hits agents wrote, whoever owns the agent", async (
     query(filters) {
       if (filters.some((filter) => filter.search !== undefined))
         return Promise.resolve([
-          message(colleague, "crew", "deploy by a person", 1700000503),
-          message(colleagueAgent, "crew", "deploy by an agent", 1700000502),
+          message(colleague, "crew", "deploy by a person", 1700000504),
+          message(colleagueAgent, "crew", "deploy by an agent", 1700000503),
           signed(envelopeAgent, {
             kind: 40002,
-            created_at: 1700000501,
+            created_at: 1700000502,
             content: JSON.stringify({ content: "deploy from an envelope" }),
             tags: [["h", "crew"]],
           }),
+          message(ownAgent, "left", "deploy by my agent", 1700000501),
         ]);
       return Promise.resolve(
         discovery.filter((event) =>
@@ -1664,6 +1668,34 @@ it("tells the reranker which hits agents wrote, whoever owns the agent", async (
       );
     },
   });
+  // The viewer's own agent has no agent profile; their library knows it.
+  const source = owner.session.agentChoices;
+  const choices = {
+    ...source.snapshot(),
+    identities: [{ pubkey: ownAgent.pubkey, name: "Mine", managed: true }],
+  };
+  // After leaving a public channel, it reads publicly again while its old
+  // roster still lists the viewer (see discovery-permissions.test.ts).
+  const channels = owner.session.channels;
+  const session = {
+    ...owner.session,
+    agentChoices: {
+      ...source,
+      snapshot: () => choices,
+      subscribe: () => () => {},
+      retain: () => () => {},
+      ensure: () => {},
+    },
+    channels: {
+      ...channels,
+      get: (id: string) => {
+        const channel = channels.get?.(id);
+        if (id !== "left" || !channel) return channel;
+        const { viewerRole: _, ...left } = channel;
+        return { ...left, readOnly: true as const };
+      },
+    },
+  } as typeof owner.session;
   const requests: DecisionRequest[] = [];
   const decisions = {
     status: () => "ready",
@@ -1675,7 +1707,7 @@ it("tells the reranker which hits agents wrote, whoever owns the agent", async (
   } as unknown as Decisions;
   render(
     <SearchResults
-      session={owner.session}
+      session={session}
       query="deploy"
       onQueryChange={() => {}}
       input={createRef<HTMLInputElement>()}
@@ -1690,14 +1722,23 @@ it("tells the reranker which hits agents wrote, whoever owns the agent", async (
     await act(async () => vi.advanceTimersByTimeAsync(500));
     expect(requests).toHaveLength(1);
     const { candidates } = JSON.parse(requests[0]?.state ?? "{}") as {
-      candidates: { text: string; from_agent?: true }[];
+      candidates: {
+        text: string;
+        from_agent?: true;
+        searcher_in_conversation?: true;
+      }[];
     };
     expect(
-      candidates.map(({ text, from_agent }) => [text, from_agent]),
+      candidates.map(({ text, from_agent, searcher_in_conversation }) => [
+        text,
+        from_agent,
+        searcher_in_conversation,
+      ]),
     ).toEqual([
-      ["deploy by a person", undefined],
-      ["deploy by an agent", true],
-      ["deploy from an envelope", true],
+      ["deploy by a person", undefined, true],
+      ["deploy by an agent", true, true],
+      ["deploy from an envelope", true, true],
+      ["deploy by my agent", true, undefined],
     ]);
   } finally {
     cleanup();

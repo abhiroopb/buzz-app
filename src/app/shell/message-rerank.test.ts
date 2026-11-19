@@ -109,7 +109,7 @@ it("sends each candidate's searcher and agent facts only when they hold", async 
       decisions,
       community: undefined,
       query: "q",
-      messages: [message("plain"), { ...message("all"), toViewer: true }],
+      messages: [message("plain"), { ...message("all"), mentionsViewer: true }],
       enabled: true,
       facts: ({ id }) => ({
         ...facts(),
@@ -133,7 +133,7 @@ it("sends each candidate's searcher and agent facts only when they hold", async 
       author: "A",
       written_by_searcher: true,
       from_agent: true,
-      mentions_or_replies_to_searcher: true,
+      mentions_searcher: true,
       searcher_in_conversation: true,
       date: "1970-01-01",
       text: "all",
