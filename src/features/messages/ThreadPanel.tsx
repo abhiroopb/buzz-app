@@ -446,6 +446,7 @@ function OwnedThreadPanel({
   active = true,
   revealSelected,
   revealFocus,
+  latestRequest,
   unreadRequest,
   requireReadyRoot,
   onDraftSaved,
@@ -526,6 +527,7 @@ function OwnedThreadPanel({
       active={active}
       revealSelected={revealSelected}
       revealFocus={revealFocus}
+      latestRequest={latestRequest}
       unreadRequest={unreadRequest}
       requireReadyRoot={requireReadyRoot}
       subthreadId={subthreadId}

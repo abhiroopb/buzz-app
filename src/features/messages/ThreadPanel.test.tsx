@@ -3065,6 +3065,20 @@ it("an unrouted retained opening retries allocation locally", () => {
   expect(h.thread).toHaveBeenCalledTimes(2);
 });
 
+it("reselecting an invocation thread returns its reader to the latest message", () => {
+  const h = messagesHarness();
+  const props: ThreadPanelProps = h.props;
+  props.subthreadId = row.id;
+  h.render();
+  h.scroll(2000);
+  expect(h.element.scrollTop).toBe(2000);
+
+  props.latestRequest = new AbortController().signal;
+  h.rerenderProps();
+
+  expect(h.element.scrollTop).toBe(3400);
+});
+
 it("releases bottom following after a jump that included child-only resizing", () => {
   vi.useFakeTimers();
   const h = messagesHarness();
