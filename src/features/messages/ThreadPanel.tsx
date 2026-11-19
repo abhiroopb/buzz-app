@@ -2346,6 +2346,11 @@ function ThreadMessages({
       void view.loadMore();
     } else void view.refresh();
   };
+  const newestReply = shownReplies.reduce<ChannelMessage | undefined>(
+    (latest, row) =>
+      !latest || compareMessages(row, latest) > 0 ? row : latest,
+    undefined,
+  )?.id;
   return (
     <MessageEditScope>
       <Reading
@@ -2362,15 +2367,9 @@ function ThreadMessages({
         // The same order the rows are shown in, so a same-second tie names
         // the row a folded group shows as its latest.
         latestMessageId={
-          snapshot.root
-            ? shownReplies.reduce<ChannelMessage | undefined>(
-                (latest, row) =>
-                  !latest || compareMessages(row, latest) > 0 ? row : latest,
-                undefined,
-              )?.id
-            : undefined
+          snapshot.root ? (presented ? endRow : newestReply) : undefined
         }
-        endMessageId={presented ? endRow : undefined}
+        catchUpMessageId={presented ? newestReply : undefined}
         partial={!!display && (!display.complete || collapsed)}
         controls={readerBar}
       />
