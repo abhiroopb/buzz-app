@@ -142,6 +142,7 @@ export function useSidebarView(
   const savedLocation = useRef(view.location).current;
   const intent = useRef(view);
   const list = useRef<HTMLElement>(null);
+  const captureScrollAnchor = useRef<(() => void) | undefined>(undefined);
   const pending = useRef(true);
   const latestLocation = useRef(location);
   useLayoutEffect(
@@ -265,6 +266,8 @@ export function useSidebarView(
       const { target, top } = destination;
       const { explicit, location } = reveal.current;
       moved.current = scroll(list.current, top) ?? moved.current;
+      // An already visible destination still establishes the new viewport.
+      captureScrollAnchor.current?.();
       intent.current = { ...intent.current, location };
       reveal.current = undefined;
       restored.current = undefined;
@@ -343,6 +346,7 @@ export function useSidebarView(
       retryReveal,
       revealAgain,
       adjustScrollAnchor,
+      captureScrollAnchor,
     }),
     [
       savedLocation,
