@@ -26,6 +26,8 @@ import { deferred, fakeHost, type Handler, PI_UPSTREAM } from "./pi-testing";
 import { type Config, DEFAULT_CONFIG, PiRuntime } from "./runtime";
 import type { GatewayRoute, GatewaySeam } from "./gateway";
 
+type MemoryStorage = ReturnType<typeof memoryStorage>;
+
 afterEach(() => {
   vi.restoreAllMocks();
 });
@@ -2083,16 +2085,6 @@ async function standaloneUsage(
       },
     ],
   };
-  const kept = new Map<string, string>();
-  vi.stubGlobal("localStorage", {
-    getItem: (key: string) => kept.get(key) ?? null,
-    setItem: (key: string, value: string) => void kept.set(key, value),
-    removeItem: (key: string) => void kept.delete(key),
-    key: (index: number) => [...kept.keys()][index] ?? null,
-    get length() {
-      return kept.size;
-    },
-  });
   const { runtime, runOnce } = setup({
     wait: () => ({ status: "done", answer: 5, text: "" }),
     places: () => ({ places: [] }),
@@ -2102,22 +2094,17 @@ async function standaloneUsage(
     }),
   });
   runtime.usageOn = () => usageOn;
-  try {
-    runtime.sync([
-      { key: self, pubkey: self, config: DEFAULT_CONFIG },
-    ] as never);
-    await runOnce("timer/t1", "Run t1");
-    // Later sessions push every saved prompt out; the turn stays the agent's.
-    for (const key of [...kept.keys()])
-      if (key.startsWith(PROMPTS_PREFIX)) kept.delete(key);
-    return await runtime.usage(
-      self,
-      since(started),
-      new AbortController().signal,
-    );
-  } finally {
-    vi.unstubAllGlobals();
-  }
+  const kept = (runtime as unknown as { storage: MemoryStorage }).storage;
+  runtime.sync([{ key: self, pubkey: self, config: DEFAULT_CONFIG }] as never);
+  await runOnce("timer/t1", "Run t1");
+  // Later sessions push every saved prompt out; the turn stays the agent's.
+  for (const key of kept.keys())
+    if (key.startsWith(PROMPTS_PREFIX)) await kept.set(key, null);
+  return await runtime.usage(
+    self,
+    since(started),
+    new AbortController().signal,
+  );
 }
 
 it("reads a standalone turn's conversation as the agent's usage, with no channel", async () => {
@@ -2143,34 +2130,21 @@ it("records no standalone turn's conversation while Usage is off", async () => {
 
 it("removes what was kept past keeping at a standalone turn while Usage is off", async () => {
   const old = `${STANDALONE_PREFIX}pi:${self}:0`;
-  const kept = new Map<string, string>([
-    [old, JSON.stringify({ version: 1, sessions: [["7", 1, "timer/t1"]] })],
-  ]);
-  vi.stubGlobal("localStorage", {
-    getItem: (key: string) => kept.get(key) ?? null,
-    setItem: (key: string, value: string) => void kept.set(key, value),
-    removeItem: (key: string) => void kept.delete(key),
-    key: (index: number) => [...kept.keys()][index] ?? null,
-    get length() {
-      return kept.size;
-    },
+  const { runtime, runOnce } = setup({
+    wait: () => ({ status: "done", answer: 5, text: "" }),
   });
-  try {
-    const { runtime, runOnce } = setup({
-      wait: () => ({ status: "done", answer: 5, text: "" }),
-    });
-    runtime.sync([
-      { key: self, pubkey: self, config: DEFAULT_CONFIG },
-    ] as never);
-    await runOnce("timer/t1", "Run t1");
-    await vi.waitFor(() =>
-      expect(
-        [...kept.keys()].filter((key) => key.startsWith(STANDALONE_PREFIX)),
-      ).toEqual([]),
-    );
-  } finally {
-    vi.unstubAllGlobals();
-  }
+  const kept = (runtime as unknown as { storage: MemoryStorage }).storage;
+  await kept.set(
+    old,
+    JSON.stringify({ version: 1, sessions: [["7", 1, "timer/t1"]] }),
+  );
+  runtime.sync([{ key: self, pubkey: self, config: DEFAULT_CONFIG }] as never);
+  await runOnce("timer/t1", "Run t1");
+  await vi.waitFor(() =>
+    expect(
+      kept.keys().filter((key) => key.startsWith(STANDALONE_PREFIX)),
+    ).toEqual([]),
+  );
 });
 
 it("reads a standalone turn begun before the cutoff by when it answered", async () => {
