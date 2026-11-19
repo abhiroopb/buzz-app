@@ -9,7 +9,7 @@ import {
   type AgentSessionRouter,
   type AgentSessionAssociation,
   type AgentSessionSource,
-  type InvocationSubthread,
+  type RoutedInvocation,
 } from "./session-admission";
 import type {} from "../navigation/service";
 import {
@@ -777,7 +777,7 @@ export type Delivery<Config = unknown> = Readonly<{
       source: AgentSessionSource;
       conversation: AgentSessionSource;
     }>,
-  ): Promise<InvocationSubthread | undefined>;
+  ): Promise<RoutedInvocation | undefined>;
   /** The native adapter calls this after authority and conversation checks. */
   prepareSession?(
     placement: Readonly<{
@@ -1426,6 +1426,7 @@ export type NewAgent = Readonly<{
 export type Agents = {
   readonly invocationSubthreads?: true;
   readonly invocationIntentVersion?: 1;
+  readonly invocationTurnContext?: true;
   registerSessionRouter(router: AgentSessionRouter): void;
   registerExecution(provider: AgentExecutionProvider): void;
   /** Select the adapter while the agent is idle. This is write-once. */
@@ -2061,6 +2062,7 @@ const wssOf = (origin: string) =>
 export class AgentsService extends Service implements Agents {
   private readonly sessionAdmissions;
   readonly invocationSubthreads = true as const;
+  readonly invocationTurnContext = true as const;
   readonly invocationIntentVersion = INVOCATION_INTENT_VERSION;
   registerSessionRouter(router: AgentSessionRouter) {
     this.sessionAdmissions.register(this.ctx, router);

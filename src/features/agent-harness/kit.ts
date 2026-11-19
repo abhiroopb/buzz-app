@@ -133,6 +133,7 @@ type Admitted = Readonly<{
   dm: boolean;
   name?: string;
   wake?: ConversationWake;
+  invocationContext?: string;
   resumed: boolean;
 }>;
 
@@ -278,6 +279,7 @@ export function harnessKit(sources: Sources): HarnessKit {
         dm,
         ...(found?.name ? { name: found.name } : {}),
         ...(wake ? { wake } : {}),
+        ...(route?.turnContext ? { invocationContext: route.turnContext } : {}),
         resumed: trigger.type === "mention" && !!trigger.resumed,
       });
       return conversation;
@@ -307,7 +309,8 @@ export function harnessKit(sources: Sources): HarnessKit {
       conversation,
       options = {},
     ) {
-      const { event, solo, dm, name, wake, resumed } = known(conversation);
+      const { event, solo, dm, name, wake, resumed, invocationContext } =
+        known(conversation);
       const { key, channel: channelId, topLevel } = conversation;
       const ready = session(agent.key);
       const thread = threadReference(event);
@@ -435,6 +438,7 @@ export function harnessKit(sources: Sources): HarnessKit {
       return {
         text: [
           resumed ? `${text}\n\n${RESUMED_PROMPT}` : text,
+          invocationContext,
           ...notes,
           turnNote(agent, channelId, noteRoot),
         ]

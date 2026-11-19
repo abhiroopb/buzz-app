@@ -1101,6 +1101,9 @@ export class ClaudeRuntime {
         const admitted = await admission(deferred);
         session = admitted?.session ?? session;
         sessionContext = admitted?.context ?? sessionContext;
+        const turnContext = [sessionContext, route?.turnContext]
+          .filter(Boolean)
+          .join("\n\n");
         // `fresh` is for a session that has been shown nothing yet.
         const prompt = async (fresh: boolean) => {
           const turn = await this.turn(
@@ -1154,7 +1157,7 @@ export class ClaudeRuntime {
           const noteRoot = key === channel ? undefined : replyRoot;
           const notes = agent.notes?.(channel, noteRoot) ?? [];
           const text = [
-            sessionContext,
+            turnContext,
             this.review(entry, prepared, notes, channel, noteRoot),
           ]
             .filter(Boolean)
@@ -1185,14 +1188,14 @@ export class ClaudeRuntime {
                       channel,
                       noteRoot,
                     );
-                    return [sessionContext, text].filter(Boolean).join("\n\n");
+                    return [turnContext, text].filter(Boolean).join("\n\n");
                   },
                 }
               : {}),
             steer: steerPrompt(text),
             fresh: async () =>
               [
-                sessionContext,
+                turnContext,
                 this.review(
                   entry,
                   (await prompt(true)).text,
