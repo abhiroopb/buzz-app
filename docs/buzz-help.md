@@ -304,6 +304,9 @@ In a Codex agent’s settings, open **Huddle voice** in the **Settings** tab to 
   also find people already verified by a matching verified name or username.
   Adding channel members also finds a verified person by their verified name,
   or by their public key, even if they never set up a profile.
+  An agent's `users` name search, and a person an agent names to its tools
+  (such as a message search's author), match a verified name, username or full
+  name as well as the profile's display name and name.
 - Profile names omit surrounding whitespace. Names with layout or directional
   controls fall back to a safe handle or public-key fragment. Names that match
   a loaded verified name after ignoring hidden characters gain a public-key suffix.
@@ -1262,7 +1265,7 @@ default Huddle voice.
   through the choices and press Enter or Space.
 - For agents running on this computer, **Identity** normally holds Harness,
   Model, Thinking, and Instructions. **Settings** holds Workspace,
-  **Sessions** (called **Conversations** for Pi), configuration history, and
+  **Session scope** (called **Conversations** for Pi), configuration history, and
   removal or deletion controls. **Memory** and **Activity** have their own tabs
   when available; plugins can add tabs such as **Attention** or **Bestie**.
   Hosted agents and agents on another device expose only the controls this
@@ -1670,6 +1673,27 @@ If an agent reports incompatible synced settings, choose the **Previous Versions
   gateway" with the reason. A sign-in the gateway refuses fails the turn
   instead. Buzz never resends work already sent through the gateway without
   it.
+- Where a build enables it, a Claude agent whose own Claude settings already
+  point at the agent gateway adds Buzz's session, agent and conversation
+  headers to each turn, keeping its other custom headers. Buzz rereads
+  Claude's settings at each new turn, so an edited endpoint or header counts
+  from the next turn; when attribution stops, Buzz puts back the person's
+  current headers. Buzz never changes Claude's endpoint, sign-in or provider.
+  A turn that can't be attributed still runs, and Activity notes "Not
+  attributed in the agent gateway" with the reason. That happens with another
+  endpoint or provider, settings Claude didn't report or take, or a managed
+  policy's or another tool's Claude settings, which Buzz leaves alone. It
+  also happens when custom headers are set only in the environment Buzz was
+  started from; Buzz leaves those as they are, and Claude itself doesn't go
+  back to them once a settings file's headers are removed. The gateway's own
+  access check never holds or fails a Claude turn: while it is still running,
+  such as just after Buzz starts, or when the gateway refuses the sign-in or
+  can't be reached, the turn runs unattributed and notes "Ran without gateway
+  attribution" with the reason. Protected Claude
+  agents are not attributed yet: their pinned launch ignores Claude's
+  settings files, including a gateway app's. Claude agents running on a
+  remote execution target are not attributed either; Buzz leaves their
+  Claude settings alone.
 - **Agents → Your teams → Previous versions**, in a team's editor, lists the
   saved versions of a team that syncs to a community, the same way. Reverting
   restores its instructions and keeps its current name; members are not

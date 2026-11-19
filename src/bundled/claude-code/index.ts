@@ -19,6 +19,8 @@ import {
 } from "../../features/agents/recommended";
 import type { AgentHandle } from "../../features/agents/service";
 import { ClaudeDefaults } from "./defaults";
+import { HARNESS } from "./attribution";
+import { routeFor, upstreamFor } from "../../features/agents/gateway/route";
 import { ClaudeRuntime, type Config, config, DEFAULT_CONFIG } from "./runtime";
 import { ClaudeSetup, withScript } from "./setup";
 import { createTabs } from "./tabs";
@@ -144,6 +146,15 @@ export const apply: PluginModule["apply"] = (ctx) => {
     undefined,
     (agent, signal, channelId) =>
       readyOwnerReads(agents.relay(agent.key), agent, signal, channelId),
+    // A session control's route, as the runner decides a turn's.
+    (key) => {
+      const route = routeFor(key);
+      return route.kind === "eligible" &&
+        route.harnesses.includes(HARNESS) &&
+        upstreamFor(HARNESS)
+        ? route
+        : undefined;
+    },
   );
   runtime.usageOn = usageOn(ctx.settingsCards);
   /** A Claude agent is running, so Buzz's copy is needed; unknown until the
@@ -215,6 +226,10 @@ export const apply: PluginModule["apply"] = (ctx) => {
   });
   agents.register<Config>({
     id: TYPE_ID,
+    // Declares its harness to the gateway, which attributes its turns. Only
+    // attributes: Claude keeps its own endpoint, so the route never holds
+    // or fails a turn.
+    gateway: { harness: HARNESS, mode: "attribution" },
     execution: true,
     conversationFolders: true,
     hooks: { events: CLAUDE_HOOK_EVENTS },
