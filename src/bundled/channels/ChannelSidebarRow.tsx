@@ -75,6 +75,12 @@ export function ChannelSidebarRow({
     const sidebar = section?.closest("nav");
     return () => {
       if (document.activeElement !== button) return;
+      const row = button.getBoundingClientRect();
+      const viewport = sidebar?.getBoundingClientRect();
+      // A background update can remove a focused row the user scrolled past.
+      const preventScroll =
+        !!viewport &&
+        (row.bottom <= viewport.top || row.top >= viewport.bottom);
       const rows = [
         ...(section?.querySelectorAll<HTMLElement>("button[data-channel-id]") ??
           []),
@@ -111,8 +117,7 @@ export function ChannelSidebarRow({
         for (const candidate of candidates) {
           if (!candidate?.isConnected || candidate.closest("[hidden], [inert]"))
             continue;
-          // A background update can remove a focused row the user scrolled past.
-          candidate.focus({ preventScroll: true });
+          candidate.focus({ preventScroll });
           if (document.activeElement === candidate) break;
         }
       });
