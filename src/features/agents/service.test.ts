@@ -555,9 +555,10 @@ it("binds a dedicated native agent and preserves its target when a provider chan
     id: "native",
     title: "Native",
     execution: true,
+    settingsProposal: { voice: true },
     protection: true,
     retire,
-    defaults: () => ({ config: {} }),
+    defaults: () => ({ config: { voice: "cove" } }),
     run: vi.fn(),
   });
   const target = {
@@ -584,6 +585,23 @@ it("binds a dedicated native agent and preserves its target when a provider chan
     name: "Dedicated",
   });
   await service.retype(agent.key, "example/native");
+  await vi.waitFor(() =>
+    expect(plugin.agents.handle(agent.key)?.updateAgent).toBeDefined(),
+  );
+  const propose = plugin.agents.handle(agent.key)?.updateAgent;
+  if (!propose) throw new Error("Missing update handle");
+  const { requestId } = await propose({
+    agent: agent.pubkey,
+    settings: { workspace: "/other/workspace" },
+  });
+  const { requestId: voiceRequest } = await propose({
+    agent: agent.pubkey,
+    settings: { voice: "maple" },
+  });
+  const { requestId: modelRequest } = await propose({
+    agent: agent.pubkey,
+    settings: { model: "local-model" },
+  });
   const beforeBinding = service.local();
   expect(
     beforeBinding.agents.find((item) => item.pubkey === agent.pubkey)
@@ -614,6 +632,72 @@ it("binds a dedicated native agent and preserves its target when a provider chan
     finishRetirement();
   }
   await changing;
+  await vi.waitFor(() =>
+    expect(plugin.agents.handle(agent.key)?.updateAgent).toBeDefined(),
+  );
+  const handle = plugin.agents.handle(agent.key);
+  if (!handle?.updateAgent) throw new Error("Missing update handle");
+  await expect(
+    handle.updateAgent({
+      agent: agent.pubkey,
+      settings: { workspace: "/other/workspace" },
+    }),
+  ).rejects.toThrow("execution adapter manages");
+  const opened = service.find(agent.key);
+  if (!opened) throw new Error("Missing agent");
+  await expect(
+    service.approveUpdate(
+      requestId,
+      {
+        type: opened.type,
+        name: opened.name,
+        config: { workspace: "/other/workspace" },
+      },
+      opened,
+    ),
+  ).rejects.toThrow("execution adapter manages");
+  expect(service.find(agent.key)?.config).toEqual(opened.config);
+  expect(service.updateRequests()[0]?.id).toBe(requestId);
+  service.dismissUpdate(requestId);
+  await expect(
+    handle.updateAgent({ agent: agent.pubkey, settings: { voice: "maple" } }),
+  ).rejects.toThrow("can only propose the default Huddle voice");
+  const approval = { type: opened.type, name: opened.name };
+  await expect(
+    service.approveUpdate(
+      voiceRequest,
+      { ...approval, config: { voice: "maple" } },
+      opened,
+    ),
+  ).rejects.toThrow("can only propose the default Huddle voice");
+  service.dismissUpdate(voiceRequest);
+  for (const settings of [{ model: "target-model" }, { effort: "high" }]) {
+    await expect(
+      handle.updateAgent({ agent: agent.pubkey, settings }),
+    ).rejects.toThrow("does not support model or thinking proposals");
+  }
+  await expect(
+    service.approveUpdate(
+      modelRequest,
+      { ...approval, config: { model: "local-model" } },
+      opened,
+    ),
+  ).rejects.toThrow("does not support model or thinking proposals");
+  expect(service.find(agent.key)?.config).toEqual(opened.config);
+  expect(service.updateRequests().map(({ id }) => id)).toEqual([modelRequest]);
+  service.dismissUpdate(modelRequest);
+  const { requestId: defaultVoiceRequest } = await handle.updateAgent({
+    agent: agent.pubkey,
+    settings: { voice: "" },
+  });
+  await service.approveUpdate(
+    defaultVoiceRequest,
+    { ...approval, config: { voice: "" } },
+    opened,
+  );
+  expect(service.find(agent.key)?.config).toEqual({ voice: "" });
+  expect(service.updateRequests()).toEqual([]);
+
   expect(
     service.local().agents.find((item) => item.pubkey === agent.pubkey)
       ?.execution,
@@ -5279,6 +5363,80 @@ describe("an agent in several communities", () => {
       warn.mockRestore();
     });
 
+    it("uses the reviewed revision if the agent's settings change during retirement", async () => {
+      const c = channels("home synced", "example/echo");
+      let release!: () => void;
+      const retiring = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const retire = vi.fn(() => retiring);
+      const f = await joined({ retire });
+      await vi.waitFor(() => expect(c.get(home)?.attach).toHaveBeenCalled());
+      relayType(f);
+      const store = internals(f.service).configStore;
+      const side = settings(home);
+      const opened = store.state(side).head?.id;
+      if (!opened) throw new Error("Missing reviewed settings");
+      const retyping = f.service.retype(
+        bot,
+        "other/relay",
+        { config: {} },
+        { settings: opened },
+      );
+      const rejected = expect(retyping).rejects.toThrow(
+        "settings changed while changing harnesses",
+      );
+      try {
+        await vi.waitFor(() => expect(retire).toHaveBeenCalled());
+        store.applyRead(side, store.capture(side), {
+          kind: "head",
+          event: settingsFor("example/echo"),
+        });
+      } finally {
+        release();
+      }
+      await rejected;
+      expect(c.get(home)?.save).not.toHaveBeenCalled();
+      expect(f.native.setType).not.toHaveBeenCalled();
+    });
+
+    it("saves reviewed instructions as well as the new harness", async () => {
+      const c = channels("home synced", "example/echo");
+      const f = await joined();
+      await vi.waitFor(() => expect(c.get(home)?.attach).toHaveBeenCalled());
+      relayType(f);
+      const store = internals(f.service).configStore;
+      const instructionsSide = instructions(home);
+      const opened = {
+        settings: store.state(settings(home)).head?.id ?? null,
+        instructions: store.state(instructionsSide).head?.id ?? null,
+      };
+      const savedInstructions = revision("Reviewed instructions");
+      const save = c.get(home)?.save;
+      save?.mockImplementationOnce(async () => {
+        store.applyRead(instructionsSide, store.capture(instructionsSide), {
+          kind: "head",
+          event: savedInstructions,
+        });
+        return { instructions: { status: "saved", head: savedInstructions } };
+      });
+      const config = { instructions: "Reviewed instructions" };
+      await f.service.retype(bot, "other/relay", { config }, opened);
+      expect(save).toHaveBeenNthCalledWith(1, expect.anything(), config, {
+        instructions: opened.instructions,
+      });
+      expect(save).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({ type: "other/relay" }),
+        config,
+        {
+          settings: opened.settings,
+        },
+      );
+      expect(f.service.find(bot)?.type).toBe("other/relay");
+      expect(store.state(instructionsSide).head?.id).toBe(savedInstructions.id);
+    });
+
     it("refuses a History revert of its settings while their head names another type", async () => {
       const c = channels("home synced", "example/echo");
       const f = await joined();
@@ -9822,6 +9980,342 @@ it("holds a watch's live events while it catches up, then hears them oldest firs
     vi.useRealTimers();
   }
 });
+
+it.each([false, true])(
+  "catches up healthy channels while another channel fails, then recovers without repeats (same watch: %s)",
+  async (sameWatch) => {
+    vi.useFakeTimers();
+    const random = vi.spyOn(Math, "random").mockReturnValue(0);
+    const { service, run, session, history, recover, ctx } = await setup({
+      identities: [echo],
+    });
+    const now = nowSeconds();
+    await service.save(bot, {
+      attentionEnabled: true,
+      attention: {
+        "watch/channel": null,
+        "watch/broken": sameWatch
+          ? null
+          : { ...chat["watch/chat"], channels: [lobby] },
+        "watch/chat": {
+          ...chat["watch/chat"],
+          channels: sameWatch ? [lobby, channel] : [channel],
+        },
+      },
+    });
+    await vi.advanceTimersByTimeAsync(1_000);
+    history.push(
+      eventDto(message(author, lobby, "delayed", now + 10)),
+      posted("healthy", now + 11),
+    );
+    const read = vi.mocked(session.readRemote);
+    const original = read.getMockImplementation() as NonNullable<
+      ReturnType<typeof read.getMockImplementation>
+    >;
+    let failing = true;
+    let failures = 0;
+    read.mockImplementation(async (filters, options) => {
+      if (failing && filters[0]?.["#h"]?.includes(lobby)) {
+        failures++;
+        throw new Error("Channel history unavailable");
+      }
+      return original(filters, options);
+    });
+    try {
+      vi.setSystemTime((now + 60) * 1000);
+      recover();
+      await vi.waitFor(() => expect(heard(run)).toEqual(["healthy"]));
+      expect(failures).toBe(1);
+      await vi.advanceTimersByTimeAsync(29_000);
+      expect(failures).toBe(1);
+      // The service checks the 30-second retry on its five-second tick.
+      await vi.advanceTimersByTimeAsync(6_000);
+      expect(failures).toBe(2);
+      expect(heard(run)).toEqual(["healthy"]);
+      failing = false;
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(heard(run)).toEqual(["healthy", "delayed"]);
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(heard(run)).toEqual(["healthy", "delayed"]);
+    } finally {
+      await ctx.fiber.dispose();
+      random.mockRestore();
+      vi.useRealTimers();
+    }
+  },
+);
+
+it.each([
+  { jitter: 0, delays: [30_000, 60_000, 120_000, 240_000, 240_000] },
+  { jitter: 1, delays: [37_500, 75_000, 150_000, 300_000, 300_000] },
+])(
+  "backs off failed history streams without delaying healthy polls (jitter: $jitter)",
+  async ({ jitter, delays }) => {
+    vi.useFakeTimers({ now: 1_000_000 });
+    const random = vi.spyOn(Math, "random").mockReturnValue(jitter);
+    const { service, run, session, history, recover, connect, unrouted, ctx } =
+      await setup({ identities: [echo] });
+    unrouted.add(lobby);
+    unrouted.add(channel);
+    await service.save(bot, {
+      attentionEnabled: true,
+      attention: {
+        "watch/channel": null,
+        "watch/chat": { ...chat["watch/chat"], channels: [lobby, channel] },
+      },
+    });
+    await vi.advanceTimersByTimeAsync(1_000);
+    const now = nowSeconds();
+    history.push(eventDto(message(author, lobby, "recovered", now + 1)));
+    const read = vi.mocked(session.readRemote);
+    const original = read.getMockImplementation() as NonNullable<
+      ReturnType<typeof read.getMockImplementation>
+    >;
+    const failures: number[] = [];
+    let failing = true;
+    const observed: (readonly unknown[] | undefined)[] = [];
+    const unsubscribe = service.subscribe(() => {
+      const statuses = service.snapshot().watchReadFailures;
+      if (statuses !== observed.at(-1)) observed.push(statuses);
+    });
+    read.mockImplementation(async (filters, options) => {
+      if (
+        failing &&
+        filters[0]?.["#h"]?.includes(lobby) &&
+        filters[0]?.kinds?.includes(9)
+      ) {
+        failures.push(Date.now());
+        throw new Error("Private relay diagnostic must stay in the host");
+      }
+      return original(filters, options);
+    });
+    try {
+      await vi.advanceTimersByTimeAsync(20_000);
+      recover();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(failures).toHaveLength(1);
+      // Reconnects retain the deadline instead of restarting the failed read.
+      recover();
+      connect(false);
+      expect(service.snapshot().watchReadFailures).toEqual([]);
+      connect(true);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(failures).toHaveLength(1);
+      for (const [index, delay] of delays.entries()) {
+        if (index === 1) {
+          history.push(posted("healthy during backoff", nowSeconds() + 1));
+          await vi.advanceTimersByTimeAsync(35_000);
+          expect(heard(run)).toEqual(["healthy during backoff"]);
+        }
+        const failedAt = failures.at(-1) as number;
+        const deadline = failedAt + delay;
+        expect(observed.at(-1)).toEqual([
+          {
+            agentKey: bot,
+            watchSlug: "watch/chat",
+            channelId: lobby,
+            summary: "Channel history could not be read",
+            consecutiveFailures: index + 1,
+            failedAt,
+            retryAt: deadline,
+          },
+        ]);
+        await vi.advanceTimersByTimeAsync(deadline - Date.now() - 1);
+        expect(failures).toHaveLength(index + 1);
+        await vi.advanceTimersByTimeAsync(5_001);
+        expect(failures).toHaveLength(index + 2);
+        expect(failures.at(-1)).toBeGreaterThanOrEqual(deadline);
+        expect(failures.at(-1)).toBeLessThanOrEqual(deadline + 5_000);
+      }
+      failing = false;
+      await vi.advanceTimersByTimeAsync((delays.at(-1) as number) + 5_000);
+      expect(heard(run)).toEqual(["healthy during backoff", "recovered"]);
+      expect(observed.at(-1)).toEqual([]);
+      // A successful read resets the next failure to the first delay.
+      failing = true;
+      await vi.advanceTimersByTimeAsync(35_000);
+      const count = failures.length;
+      expect(count).toBe(7);
+      expect(observed.at(-1)).toMatchObject([{ consecutiveFailures: 1 }]);
+      const resetDeadline = (failures.at(-1) as number) + (delays[0] as number);
+      await vi.advanceTimersByTimeAsync(resetDeadline - Date.now() - 1);
+      expect(failures).toHaveLength(count);
+      await vi.advanceTimersByTimeAsync(5_001);
+      expect(failures).toHaveLength(count + 1);
+    } finally {
+      unsubscribe();
+      await ctx.fiber.dispose();
+      random.mockRestore();
+      vi.useRealTimers();
+    }
+  },
+);
+
+it.each([
+  "disable",
+  "remove",
+  "edit",
+  "pause",
+  "offline pause",
+  "stop",
+] as const)(
+  "resets or cancels history backoff when its owner chooses %s",
+  async (action) => {
+    vi.useFakeTimers({ now: 1_000_000 });
+    const random = vi.spyOn(Math, "random").mockReturnValue(0);
+    const { service, session, recover, connect, unrouted, ctx } = await setup({
+      identities: [echo],
+    });
+    unrouted.add(lobby);
+    const watch = { ...chat["watch/chat"], channels: [lobby] };
+    await service.save(bot, {
+      attention: { "watch/channel": null, "watch/chat": watch },
+    });
+    await vi.advanceTimersByTimeAsync(1_000);
+    const read = vi.mocked(session.readRemote);
+    const original = read.getMockImplementation() as NonNullable<
+      ReturnType<typeof read.getMockImplementation>
+    >;
+    const failures: number[] = [];
+    read.mockImplementation(async (filters, options) => {
+      if (
+        filters[0]?.["#h"]?.includes(lobby) &&
+        filters[0]?.kinds?.includes(9)
+      ) {
+        failures.push(Date.now());
+        throw new Error("Channel history unavailable");
+      }
+      return original(filters, options);
+    });
+    try {
+      await vi.advanceTimersByTimeAsync(20_000);
+      recover();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(failures).toHaveLength(1);
+      await vi.advanceTimersByTimeAsync(35_000);
+      expect(failures).toHaveLength(2);
+      expect(service.snapshot().watchReadFailures).toMatchObject([
+        { consecutiveFailures: 2 },
+      ]);
+      const offline = action === "offline pause";
+      const pause = action === "pause" || offline;
+      if (offline) {
+        connect(false);
+        expect(service.snapshot().running).toEqual([]);
+      }
+      if (action === "stop") await ctx.fiber.dispose();
+      else
+        await service.save(bot, {
+          attention: pause
+            ? {
+                "interest/default": {
+                  type: "interest",
+                  instructions: "Watch",
+                  paused: true,
+                },
+              }
+            : {
+                "watch/chat":
+                  action === "remove"
+                    ? null
+                    : {
+                        ...watch,
+                        ...(action === "edit"
+                          ? { name: "Edited watch" }
+                          : { enabled: false }),
+                      },
+              },
+        });
+      await vi.advanceTimersByTimeAsync(0);
+      if (action !== "edit") {
+        expect(service.snapshot().watchReadFailures).toEqual([]);
+        if (!offline) await vi.advanceTimersByTimeAsync(600_000);
+        expect(failures).toHaveLength(2);
+        if (action === "stop") return;
+        await service.save(bot, {
+          attention: pause
+            ? {
+                "interest/default": {
+                  type: "interest",
+                  instructions: "Watch",
+                },
+              }
+            : { "watch/chat": watch },
+        });
+        if (offline) connect(true);
+        await vi.advanceTimersByTimeAsync(offline ? 5_000 : 35_000);
+      }
+      expect(failures).toHaveLength(3);
+      expect(service.snapshot().watchReadFailures).toMatchObject([
+        { consecutiveFailures: 1 },
+      ]);
+      const deadline = (failures.at(-1) as number) + 30_000;
+      await vi.advanceTimersByTimeAsync(deadline - Date.now() - 1);
+      expect(failures).toHaveLength(3);
+      await vi.advanceTimersByTimeAsync(5_001);
+      expect(failures).toHaveLength(4);
+    } finally {
+      await ctx.fiber.dispose();
+      random.mockRestore();
+      vi.useRealTimers();
+    }
+  },
+);
+
+it.each([false, true])(
+  "does not overlap a history pass while another stream waits, and honors cancellation (%s)",
+  async (cancel) => {
+    vi.useFakeTimers({ now: 1_000_000 });
+    const { service, session, recover, ctx } = await setup({
+      identities: [echo],
+    });
+    const gate = runnerGate();
+    const watch = { ...chat["watch/chat"], channels: [lobby, channel] };
+    await service.save(bot, {
+      attention: { "watch/channel": null, "watch/chat": watch },
+    });
+    await vi.advanceTimersByTimeAsync(1_000);
+    const read = vi.mocked(session.readRemote);
+    const original = read.getMockImplementation() as NonNullable<
+      ReturnType<typeof read.getMockImplementation>
+    >;
+    let failures = 0,
+      pending = 0;
+    read.mockImplementation(async (filters, options) => {
+      if (filters[0]?.kinds?.includes(9) && filters[0]?.until !== undefined) {
+        if (filters[0]?.["#h"]?.includes(lobby)) {
+          failures++;
+          throw new Error("Channel history unavailable");
+        }
+        if (filters[0]?.["#h"]?.includes(channel)) {
+          pending++;
+          await gate.promise;
+          options?.signal?.throwIfAborted();
+        }
+      }
+      return original(filters, options);
+    });
+    try {
+      vi.setSystemTime(1_060_000);
+      recover();
+      await vi.waitFor(() => expect(pending).toBe(1));
+      await vi.advanceTimersByTimeAsync(300_000);
+      expect(failures).toBe(1);
+      expect(pending).toBe(1);
+      if (cancel)
+        await service.save(bot, {
+          attention: { "watch/chat": { ...watch, enabled: false } },
+        });
+      gate.resolve();
+      await vi.advanceTimersByTimeAsync(cancel ? 300_000 : 5_000);
+      expect(failures).toBe(cancel ? 1 : 2);
+    } finally {
+      gate.resolve();
+      await ctx.fiber.dispose();
+      vi.useRealTimers();
+    }
+  },
+);
 
 it("starts catch-up again when its watch is edited while a page is being read", async () => {
   vi.useFakeTimers({ toFake: ["Date"] });
@@ -22586,4 +23080,226 @@ it("does not call a consumer when protection denies its provider operation", asy
     ),
   ).rejects.toThrow("Provider operation denied");
   expect(called).not.toHaveBeenCalled();
+});
+
+it("keeps self and sibling settings proposals out of agent state until the owner approves them", async () => {
+  const { service, native, plugin, type } = await setup();
+  plugin.agents.register({
+    ...type,
+    id: "settings",
+    settingsProposal: { voice: true, apps: true, compactAt: true },
+  });
+  const kind = "example/settings";
+  await service.create({ type: kind, name: "Proposer" });
+  await service.create({ type: kind, name: "Sibling" });
+  await vi.waitFor(() => expect(plugin.agents.handle(bot)).toBeDefined());
+  const handle = plugin.agents.handle(bot);
+  if (!handle) throw new Error("Missing handle");
+  const client = appClient(handle, {
+    read: vi.fn(),
+    memories: async () => ({ entries: [], partial: false }),
+  });
+  const siblingOpened = service.find(sibling);
+  if (!siblingOpened) throw new Error("Missing sibling");
+  const proposerConfig = service.find(bot)?.config;
+  await expect(
+    callTool(client, {}, "agent_update", {
+      agent: sibling,
+      scope: "thread",
+      workspace: "~/.buzz",
+      apps: false,
+      compactAt: "",
+    }),
+  ).rejects.toThrow("The proposed settings match the saved settings");
+  expect(service.updateRequests()).toEqual([]);
+  await callTool(client, {}, "agent_update", {
+    agent: sibling,
+    name: "Reviewer",
+    scope: "thread",
+  });
+  const [rename] = service.updateRequests();
+  expect(rename).toMatchObject({ name: "Reviewer" });
+  expect(rename?.settings).toBeUndefined();
+  if (rename) service.dismissUpdate(rename.id);
+  const siblingConfig = { scope: "community", compactAt: "150000" };
+  await callTool(client, {}, "agent_update", {
+    agent: sibling,
+    ...siblingConfig,
+  });
+  const [siblingReview] = service.updateRequests();
+  if (!siblingReview) throw new Error("Missing sibling review");
+  expect(siblingReview).toMatchObject({
+    requester: bot,
+    agent: sibling,
+    settings: siblingConfig,
+  });
+  expect(service.find(sibling)?.config).toEqual(siblingOpened.config);
+  await service.approveUpdate(
+    siblingReview.id,
+    { type: kind, name: "Sibling", config: siblingConfig },
+    siblingOpened,
+  );
+  expect(service.find(sibling)?.config).toEqual(siblingConfig);
+  expect(service.find(bot)?.config).toEqual(proposerConfig);
+  expect(service.updateRequests()).toEqual([]);
+  const settings = { scope: "community", voice: "maple", apps: false };
+  const propose = () =>
+    callTool(client, {}, "agent_update", { agent: bot, ...settings });
+  const opened = service.find(bot);
+  if (!opened) throw new Error("Missing agent");
+  const savedConfig = opened.config;
+  await propose();
+  const [draft] = service.updateRequests();
+  if (!draft) throw new Error("Missing draft");
+  expect(draft.settings).toEqual(settings);
+  expect(service.find(bot)?.config).toEqual(savedConfig);
+  expect(native.setType).not.toHaveBeenCalled();
+  service.dismissUpdate(draft.id);
+  expect(service.find(bot)?.config).toEqual(savedConfig);
+
+  await propose();
+  const [review] = service.updateRequests();
+  if (!review) throw new Error("Missing review");
+  const approved = {
+    type: kind,
+    name: "Proposer",
+    config: { ...settings, voice: "cove" },
+  };
+  await service.save(bot, { config: { scope: "channel" } });
+  await expect(
+    service.approveUpdate(review.id, approved, opened),
+  ).rejects.toThrow("changed while this review was open");
+  expect(service.find(bot)?.config).toEqual({ scope: "channel" });
+  service.dismissUpdate(review.id);
+
+  await propose();
+  const [fresh] = service.updateRequests();
+  if (!fresh) throw new Error("Missing new review");
+  const freshOpened = service.find(bot);
+  const renamed = { ...approved, name: "Reviewer" };
+  native.rename.mockRejectedValueOnce(new Error("Cannot rename right now"));
+  await expect(
+    service.approveUpdate(fresh.id, renamed, freshOpened),
+  ).rejects.toThrow("Cannot rename right now");
+  expect(service.find(bot)?.config).toEqual(approved.config);
+  await service.approveUpdate(fresh.id, renamed, freshOpened);
+  expect(service.find(bot)?.config).toEqual(approved.config);
+  expect(service.updateRequests()).toEqual([]);
+
+  await propose();
+  const [beforeRetype] = service.updateRequests();
+  if (!beforeRetype) throw new Error("Missing pre-retype review");
+  await service.retype(bot, "example/echo");
+  const afterRetype = service.find(bot);
+  if (!afterRetype) throw new Error("Missing retyped agent");
+  await expect(
+    service.approveUpdate(
+      beforeRetype.id,
+      { type: afterRetype.type, name: afterRetype.name },
+      afterRetype,
+    ),
+  ).rejects.toThrow("changed harnesses after this proposal");
+  expect(service.updateRequests()[0]?.id).toBe(beforeRetype.id);
+});
+
+it("retries a proposal after saving a synced settings revision and failing to rename", async () => {
+  const subject: Subject = {
+    owner: viewer,
+    community: "https://relay.example.test",
+    subject: bot,
+    channel: "9b353519-f4fe-4757-aef4-bec6cc0ae54c",
+    type: "buzz.agent.settings",
+  };
+  const { service, native, plugin, type, ctx } = await setup({
+    binding: () => ({ settings: { mode: "synced", subject } }),
+  });
+  const kind = "example/settings";
+  plugin.agents.register({
+    ...type,
+    id: "settings",
+    settingsProposal: {},
+    syncedSettings: {
+      schema: { effort: ["low", "max"] },
+      withSynced: (config, settings) => ({ ...config, ...settings }),
+    },
+  });
+  try {
+    await service.create({ type: kind, name: "Before" });
+    const { configStore, communityConfigs } = internals(service);
+    const secret = generateSecretKey();
+    const revision = (effort: string, created_at: number) =>
+      finalizeEvent(
+        {
+          kind: 45010,
+          created_at,
+          content: JSON.stringify({
+            version: 1,
+            agentType: kind,
+            settings: { effort },
+          }),
+          tags: [["op", "create"]],
+        },
+        secret,
+      ) as RelayEvent;
+    const openedHead = revision("low", 1);
+    const savedHead = revision("max", 2);
+    configStore.applyRead(subject, configStore.capture(subject), {
+      kind: "head",
+      event: openedHead,
+    });
+    const save = vi.fn(
+      async (_agent: unknown, _config: unknown, base: unknown) => {
+        expect(base).toEqual({ settings: openedHead.id });
+        configStore.applyRead(subject, configStore.capture(subject), {
+          kind: "head",
+          event: savedHead,
+        });
+        return { settings: { status: "saved", head: savedHead } };
+      },
+    );
+    communityConfigs.set(subject.community, {
+      attach: vi.fn(),
+      dispose: vi.fn(),
+      save,
+    });
+    await vi.waitFor(() => expect(plugin.agents.handle(bot)).toBeDefined());
+    const handle = plugin.agents.handle(bot);
+    if (!handle) throw new Error("Missing handle");
+    const client = appClient(handle, {
+      read: vi.fn(),
+      memories: async () => ({ entries: [], partial: false }),
+    });
+    await callTool(client, {}, "agent_update", {
+      agent: bot,
+      name: "After",
+      effort: "max",
+    });
+    const [review] = service.updateRequests();
+    const opened = service.find(bot);
+    if (!review || !opened) throw new Error("Missing settings review");
+    expect(opened.configBase?.settings).toBe(openedHead.id);
+
+    const approved = {
+      type: kind,
+      name: "After",
+      config: { reply: "ok", effort: "max" },
+    };
+    native.rename.mockRejectedValueOnce(new Error("Cannot rename right now"));
+    await expect(
+      service.approveUpdate(review.id, approved, opened),
+    ).rejects.toThrow(
+      "Saved so far: Settings. Cannot rename right now. You can retry Save.",
+    );
+    expect(service.find(bot)).toMatchObject({
+      name: "Before",
+      config: approved.config,
+      configBase: { settings: savedHead.id },
+    });
+    await service.approveUpdate(review.id, approved, opened);
+    expect(save).toHaveBeenCalledOnce();
+    expect(service.find(bot)?.name).toBe("After");
+    expect(service.updateRequests()).toEqual([]);
+  } finally {
+    await ctx.fiber.dispose();
+  }
 });

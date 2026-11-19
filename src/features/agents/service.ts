@@ -93,6 +93,13 @@ import {
   type PluginNote,
   withNote,
 } from "./plugin-notes";
+import {
+  type AgentSettingsProposal,
+  type AgentSettingsProposalSupport,
+  compactionProposalProblem,
+  settingsProposalMatches,
+  settingsProposalProblem,
+} from "./settings-proposal";
 import { nativeRelayInfo } from "../relay/native";
 import { AgentRunners, type Connection, TIMEOUT_LIMIT_MS } from "./runner";
 import { CoreMemoryCache } from "./core-memory-cache";
@@ -347,6 +354,10 @@ export type AgentSettingsHost = Readonly<{
   typeControl?: (dirty: boolean, action?: ReactNode) => ReactNode;
   /** Host-owned type change committed with the target type's settings draft. */
   pendingSave?: (config?: unknown) => Promise<void>;
+  /** Validate the final model and thinking pair in an owner review. */
+  proposedModelOrEffort?: boolean;
+  /** This owner review was seeded with an agent-proposed Huddle voice. */
+  proposedVoice?: boolean;
 }>;
 /** What each of a type's settings tabs receives. A type writes only its own
  * config; the app owns the name and attention. */
@@ -1044,6 +1055,9 @@ export type AgentType<Config = unknown> = {
     config: Config,
     context?: AgentModelSettingsContext,
   ): AgentModelSettings;
+  /** The Settings tab reviews these drafts and writes only via its Save.
+   * Model, effort, scope and workspace use the standard config keys. */
+  settingsProposal?: AgentSettingsProposalSupport;
   /** Describes harness settings for a type-change preview. Rendered labels
    * never determine migration behavior. */
   describeMigration?(config: Config): readonly AgentMigrationSetting[];
@@ -1323,6 +1337,7 @@ export type AgentUpdate = Readonly<{
   type?: string;
   instructions?: string;
   picture?: string;
+  settings?: AgentSettingsProposal;
 }>;
 /** `agent` is a pubkey or the exact name of one of the owner's agents here. */
 export type AgentUpdateInput = Omit<AgentUpdate, "picture"> &
@@ -1392,6 +1407,20 @@ export type InterruptedTurn = Readonly<{
   channelId: string;
   channel?: ChannelSummary | undefined;
 }>;
+/** A failing event-watch history stream on this device. */
+export type WatchReadFailure = Readonly<{
+  agentKey: AgentKey;
+  watchSlug: string;
+  /** The channel the watch reads, or null for its all-channels stream. */
+  channelId: string | null;
+  /** Host-authored text. Raw relay errors are private to host diagnostics. */
+  summary: string;
+  consecutiveFailures: number;
+  /** Unix milliseconds of the most recent failure. */
+  failedAt: number;
+  /** Earliest retry in Unix milliseconds. A tick, connection or pass can delay it. */
+  retryAt: number;
+}>;
 export type AgentsSnapshot = Readonly<{
   status: "unavailable" | "loading" | "ready" | "error";
   /** Whether a watch's classifier can run on this device now. */
@@ -1405,6 +1434,9 @@ export type AgentsSnapshot = Readonly<{
   /** Running agents that were working when the app last closed or reloaded,
    * until the owner resumes or forgets those turns. */
   interrupted: readonly Agent[];
+  /** Local event-watch history failures for the viewer's running agents.
+   * Absent on older hosts. Runtime only, cleared on app restart. */
+  watchReadFailures?: readonly WatchReadFailure[];
   /** The owner's teams on this device, which every community shares, and
    * each synced team with a confirmed copy. */
   teams: readonly Team[];
@@ -1721,7 +1753,7 @@ export type Agents = {
   dismissUpdate(id: string): void;
   /** Saves the owner-reviewed edit form, the agent's settings with the
    * request's changes, to the request's agent. */
-  approveUpdate(id: string, input: NewAgent): Promise<void>;
+  approveUpdate(id: string, input: NewAgent, opened?: Agent): Promise<void>;
   /** Local, unsaved team change requests; closing a review discards one. */
   teamUpdateRequests(): readonly TeamUpdateRequest[];
   dismissTeamUpdate(id: string): void;
@@ -2294,6 +2326,17 @@ export class AgentsService extends Service implements Agents {
   private updates: readonly AgentUpdateRequest[] = [];
   private teamUpdates: readonly TeamUpdateRequest[] = [];
   private readonly approving = new Set<string>();
+  private readonly updateProgress = new Map<
+    string,
+    {
+      base: ConfigBase;
+      localConfig: unknown;
+      type: string;
+      name: string;
+      picture: Agent["picture"];
+      saved: Set<string>;
+    }
+  >();
   /** Every saved membership, deleted ones included: native's list is the
    * agent list, and `records` only adds settings to it. */
   private identities: readonly Member[] = [];
@@ -2460,6 +2503,7 @@ export class AgentsService extends Service implements Agents {
       agents: [],
       running: [],
       interrupted: [],
+      watchReadFailures: Object.freeze([]),
       teams: this.teamList,
     });
     this.protection = new AgentProtectionService(
@@ -2573,8 +2617,10 @@ export class AgentsService extends Service implements Agents {
         this.attend(this.state.running);
         this.notify();
       },
+      watchReadFailuresChanged: () => queueMicrotask(() => this.notify()),
       ready: (key) => this.ready(key),
       agent: (key) => this.agent(key),
+      savedAttention: (key) => this.records[key]?.attention ?? EMPTY,
       member: (agent, event) => this.member(agent, event),
       reads: (agent, event) => this.reads(agent, event),
       resolveChannels: async (agent, ids, signal) => {
@@ -2754,10 +2800,26 @@ export class AgentsService extends Service implements Agents {
             }),
             ...(picture !== undefined &&
               picture !== identity.picture && { picture }),
+            ...(proposed.settings && { settings: proposed.settings }),
           };
           if (Object.keys(change).length === 0 && !pending)
             throw new Error("Propose at least one change");
           this.updateKind(identity, change);
+          let draft = change;
+          if (change.settings && !change.type) {
+            const current = this.view(identity, this.recordOf(identity));
+            if (
+              !current.configProblem &&
+              settingsProposalMatches(current.config, change.settings)
+            ) {
+              const { settings: _, ...otherChanges } = change;
+              if (!pending && Object.keys(otherChanges).length === 0)
+                throw new Error(
+                  "The proposed settings match the saved settings.",
+                );
+              draft = otherChanges;
+            }
+          }
           if (this.pendingRequests() >= 16)
             throw new Error("Review the pending agent requests first");
           return {
@@ -2769,7 +2831,7 @@ export class AgentsService extends Service implements Agents {
             agent: identity.pubkey,
             agentName: identity.name,
             agentType: identity.type,
-            ...change,
+            ...draft,
           };
         };
         // Its picture uploads only for a valid request, which is then
@@ -4495,9 +4557,10 @@ export class AgentsService extends Service implements Agents {
   dismissUpdate = (id: string) => {
     if (this.approving.has(id)) return;
     this.updates = this.updates.filter((request) => request.id !== id);
+    this.updateProgress.delete(id);
     this.notify();
   };
-  async approveUpdate(id: string, input: NewAgent) {
+  async approveUpdate(id: string, input: NewAgent, opened?: Agent) {
     const request = this.updates.find((item) => item.id === id);
     if (!request || this.approving.has(id))
       throw new Error("No such pending agent request");
@@ -4505,6 +4568,7 @@ export class AgentsService extends Service implements Agents {
     const identity = this.identities.find(
       (member) =>
         member.pubkey === request.agent &&
+        member.owner === request.owner &&
         originOf(member.relay) === request.community &&
         !member.deleted,
     );
@@ -4513,25 +4577,114 @@ export class AgentsService extends Service implements Agents {
     const binding = this.bindingOf(identity);
     if (!binding || binding.controller.signal.aborted)
       throw new Error("Connect to the agent's community first");
+    const current = this.view(identity, this.recordOf(identity));
+    let progress = this.updateProgress.get(id);
+    if (request.settings) {
+      if (
+        !opened ||
+        current.key !== opened.key ||
+        current.type !== (progress?.type ?? opened.type) ||
+        current.name !== (progress?.name ?? opened.name) ||
+        current.picture !== (progress ? progress.picture : opened.picture) ||
+        current.protectionRevision !== opened.protectionRevision ||
+        JSON.stringify(current.executionBinding) !==
+          JSON.stringify(opened.executionBinding) ||
+        (progress
+          ? JSON.stringify(this.settingsOf(identity).config) !==
+            JSON.stringify(progress.localConfig)
+          : JSON.stringify(current.config) !== JSON.stringify(opened.config)) ||
+        SIDES.some(
+          (side) =>
+            current.configBase?.[side] !==
+            (progress?.base ?? opened.configBase)?.[side],
+        )
+      )
+        throw new Error(
+          "The agent changed while this review was open. Close it and ask for a new proposal.",
+        );
+      if (!progress?.saved.has("Harness")) {
+        const proposedType = request.type ?? request.agentType;
+        const support = this.types().find(
+          (kind) => kind.key === proposedType,
+        )?.settingsProposal;
+        const problem = settingsProposalProblem(
+          request.settings,
+          current,
+          current.executionBinding,
+          support,
+          request.agentType,
+        );
+        if (problem) throw new Error(problem);
+      }
+      progress ??= {
+        base: { ...opened.configBase },
+        localConfig: this.settingsOf(identity).config,
+        type: current.type,
+        name: current.name,
+        picture: current.picture,
+        saved: new Set(),
+      };
+      this.updateProgress.set(id, progress);
+    }
     const { type, name, picture, config } = input;
-    this.updateKind(identity, { name, type });
+    this.updateKind(identity, {
+      name,
+      type,
+      ...(type === (request.type ?? request.agentType) &&
+        request.settings && { settings: request.settings }),
+    });
     const { key } = identity;
     const retyped = type !== identity.type;
     this.approving.add(id);
     try {
-      if (retyped)
+      const recordRevision = (side: Side, revision: string) => {
+        if (!progress) return;
+        progress.base[side] = revision;
+        progress.saved.add(side === "settings" ? "Settings" : "Instructions");
+      };
+      if (retyped) {
         await this.retype(
           key,
           type,
           config === undefined ? undefined : { config },
+          progress?.base,
+          recordRevision,
         );
-      await this.save(key, {
-        name,
-        ...(picture && { picture }),
-        ...(!retyped && config !== undefined && { config }),
-      });
+        if (progress) {
+          progress.type = type;
+          progress.localConfig = this.settingsOf(identity).config;
+          progress.saved.add("Harness");
+        }
+      }
+      if (progress) {
+        if (!retyped && config !== undefined) {
+          await this.save(key, { config, base: progress.base }, recordRevision);
+          progress.localConfig = this.settingsOf(identity).config;
+          progress.saved.add("Settings");
+        }
+        await this.save(key, { name });
+        if (name !== current.name) progress.saved.add("Name");
+        progress.name = name.trim();
+        if (picture) {
+          await this.save(key, { picture });
+          if (picture !== current.picture) progress.saved.add("Picture");
+          progress.picture = picture;
+        }
+      } else {
+        await this.save(key, {
+          name,
+          ...(picture && { picture }),
+          ...(!retyped && config !== undefined && { config }),
+        });
+      }
+      this.updateProgress.delete(id);
       this.updates = this.updates.filter((item) => item.id !== id);
       this.notify();
+    } catch (error) {
+      if (!progress?.saved.size) throw error;
+      throw new Error(
+        `Saved so far: ${[...progress.saved].join(", ")}. ${message(error)}. You can retry Save.`,
+      );
     } finally {
       this.approving.delete(id);
     }
@@ -4655,7 +4808,7 @@ export class AgentsService extends Service implements Agents {
     };
   }
   /** The type `change` leaves the agent with, refusing what it cannot apply. */
-  private updateKind(identity: AgentIdentity, change: AgentUpdate) {
+  private updateKind(identity: Member, change: AgentUpdate) {
     if (change.name !== undefined && !change.name.trim())
       throw new Error("Name the agent");
     const kind = this.types().find(
@@ -4666,6 +4819,29 @@ export class AgentsService extends Service implements Agents {
       throw new Error("A hosted provider cannot take over a local agent key");
     if (change.instructions !== undefined && !kind.adopt)
       throw new Error(`${kind.title} agents have no instructions to change`);
+    if (change.settings) {
+      const { voice, apps } = change.settings;
+      const support = kind.settingsProposal;
+      if (!support)
+        throw new Error(`${kind.title} does not accept settings proposals`);
+      if (voice !== undefined && !support.voice)
+        throw new Error(`${kind.title} does not offer a Huddle voice setting`);
+      if (apps !== undefined && !support.apps)
+        throw new Error(`${kind.title} does not offer a Codex apps setting`);
+      const compactionProblem = compactionProposalProblem(
+        change.settings,
+        kind,
+        Boolean(identity.protection),
+      );
+      if (compactionProblem) throw new Error(compactionProblem);
+      const problem = settingsProposalProblem(
+        change.settings,
+        identity,
+        this.executions.read(identity.key),
+        support,
+      );
+      if (problem) throw new Error(problem);
+    }
     return kind;
   }
   /** Whether watch classifiers can run on this device: the selected
@@ -5251,23 +5427,32 @@ export class AgentsService extends Service implements Agents {
   };
   /** A plugin's notes change only through `setNote` and its kin: any other
    * save keeps the agent's current ones. */
-  save(key: AgentKey, change: AgentChange) {
+  save(
+    key: AgentKey,
+    change: AgentChange,
+    onRevision?: (side: Side, revision: string) => void,
+  ) {
     if (!change.config || typeof change.config !== "object")
-      return this.saveAs(key, change);
+      return this.saveAs(key, change, onRevision);
     const { pluginNotes: _, ...config } = change.config as {
       pluginNotes?: unknown;
     };
     const notes = notesOf(this.liveAgent(key)?.config);
-    return this.saveAs(key, {
-      ...change,
-      config: notes ? { ...config, pluginNotes: notes } : config,
-    });
+    return this.saveAs(
+      key,
+      { ...change, config: notes ? { ...config, pluginNotes: notes } : config },
+      onRevision,
+    );
   }
   private liveAgent(key: AgentKey) {
     const { agents, running } = this.snapshot();
     return [...agents, ...running].find((item) => item.key === key);
   }
-  private async saveAs(key: AgentKey, change: AgentChange) {
+  private async saveAs(
+    key: AgentKey,
+    change: AgentChange,
+    onRevision?: (side: Side, revision: string) => void,
+  ) {
     const identity = this.liveMember(key);
     // A hosted agent's key is its pubkey.
     if (!identity)
@@ -5283,7 +5468,12 @@ export class AgentsService extends Service implements Agents {
     // isn't saved there changes nothing here and stays in the editor.
     const home = key === pubkey;
     if (change.config !== undefined)
-      await this.saveSynced(identity, change.config as object, change.base);
+      await this.saveSynced(
+        identity,
+        change.config as object,
+        change.base,
+        onRevision,
+      );
     if (!home && change.config !== undefined)
       await this.change(pubkey, (saved) =>
         changed(saved ?? this.settingsOf(identity), { config: change.config }),
@@ -5326,11 +5516,14 @@ export class AgentsService extends Service implements Agents {
     identity: AgentIdentity,
     config: object,
     base: ConfigBase = this.editorConfig(identity, config)?.base ?? {},
+    onRevision?: (side: Side, revision: string) => void,
+    only?: Side,
   ) {
     const live = this.communityConfigs.get(this.configHome(identity));
     const binding = this.configBinding(identity);
     const agent = this.configAgent(identity, config);
-    const applies = (side: Side) => side === "instructions" || !!agent.schema;
+    const applies = (side: Side) =>
+      (!only || side === only) && (side === "instructions" || !!agent.schema);
     this.refuseWhileMoving(identity, applies);
     const edited = SIDES.filter((side) => {
       const subject = binding[side]?.subject;
@@ -5355,7 +5548,15 @@ export class AgentsService extends Service implements Agents {
       })
     )
       throw new Error(problem);
-    const saved = await live.save(agent, config, base);
+    const saved = await live.save(
+      agent,
+      config,
+      only ? { [only]: base[only] } : base,
+    );
+    for (const side of SIDES) {
+      const result = saved[side];
+      if (result?.status === "saved") onRevision?.(side, result.head.id);
+    }
     const failures = (Object.values(saved) as Saved[]).flatMap((result) =>
       result.status === "saved" ? [] : [saveProblem(result)],
     );
@@ -5769,6 +5970,8 @@ export class AgentsService extends Service implements Agents {
     key: AgentKey,
     type: string,
     change?: Readonly<{ config: unknown }>,
+    base?: ConfigBase,
+    onRevision?: (side: Side, revision: string) => void,
   ) {
     const identity = this.liveMember(key);
     if (!this.native || !identity)
@@ -5790,8 +5993,22 @@ export class AgentsService extends Service implements Agents {
         kind,
       );
       const config = change ? change.config : adopted;
+      if (base && change && "instructions" in base)
+        await this.saveSynced(
+          identity,
+          config as object,
+          base,
+          onRevision,
+          "instructions",
+        );
       // Its other devices take the type its synced settings name.
-      await this.publishType(identity, type, config as object);
+      await this.publishType(
+        identity,
+        type,
+        config as object,
+        base,
+        onRevision,
+      );
       await this.applyType(identity, type, config);
       return preview.dropped;
     };
@@ -5838,11 +6055,15 @@ export class AgentsService extends Service implements Agents {
     identity: AgentIdentity,
     type: string,
     config: object,
+    base?: ConfigBase,
+    onRevision?: (side: Side, revision: string) => void,
   ) {
     await this.checkExecutionType(identity.pubkey, type);
     const settings = this.configBinding(identity).settings;
     if (!settings || !isSynced(this.configStore, settings)) return;
     const head = this.configStore.state(settings.subject).head;
+    if (base && (head?.id ?? null) !== (base.settings ?? null))
+      throw new Error("The agent’s settings changed while changing harnesses.");
     if (head && settingsType(head) === type) return;
     const live = this.communityConfigs.get(this.configHome(identity));
     if (!live) throw new Error("Connect to the community to change its type");
@@ -5858,6 +6079,7 @@ export class AgentsService extends Service implements Agents {
           ? saveProblem(result)
           : "This agent's config isn't synced here yet; try again",
       );
+    onRevision?.("settings", result.head.id);
   }
   /** Makes the agent `type` here with `config`, as its type's change saves. */
   private async applyType(
@@ -8171,6 +8393,18 @@ export class AgentsService extends Service implements Agents {
     }
   }
   private notify() {
+    const failures = this.state.running.flatMap((agent) =>
+      this.runners.watchReadFailures(agent),
+    );
+    const prior = this.state.watchReadFailures;
+    if (
+      failures.length !== prior?.length ||
+      failures.some((failure, index) => failure !== prior[index])
+    )
+      this.state = Object.freeze({
+        ...this.state,
+        watchReadFailures: Object.freeze(failures),
+      });
     for (const listener of this.listeners) listener();
   }
   /** The event's channel as the agent's community knows it, if at all. */
