@@ -1301,6 +1301,10 @@ default Huddle voice.
   conversation in that target's workspace. Stop ends its active turn.
   Remote Claude usage totals and transcripts are unavailable.
 
+### Recover incompatible agent settings
+
+If an agent reports incompatible synced settings, choose the **Previous Versions** link to go to its Settings tab. Versions that use settings this client cannot apply are marked **Incompatible**. Malformed versions are marked **Not valid**. Open an older compatible Settings version and choose **Revert to this** to restore its settings as a new version. Reverting keeps the agent’s instructions. If you cannot find a compatible revision, use a Buzz version that supports the saved settings.
+
 ### Builderlab accounts and remote agents
 
 - Builderlab uses one account and sign-in for the communities and agents it

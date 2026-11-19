@@ -66,6 +66,7 @@ import type { ChannelLabel } from "../../features/channels/channel-icon";
 import { appClient, readFile } from "../../buzz-mcp/app-client";
 import { readAuthorNames } from "../../features/agent-harness/author-names";
 import { readProject } from "../../features/agent-harness/project";
+import type { Facts } from "../../features/agent-harness/sections/index";
 import {
   referencedFolders,
   referencedSkills,
@@ -110,6 +111,7 @@ import {
   developerInstructions,
   rootOf,
   sessionName,
+  sessionPlace,
   turnContext,
   turnInput,
   type Conversation,
@@ -849,15 +851,16 @@ export class CodexRuntime {
       const server = this.open(this.handle(agent.key));
       const rpc = await server.opening;
       const settings = this.resolveConfig(agent.config);
+      const conversation = {
+        channelId: place.channelId,
+        ...((settings.scope === "channel" && !place.isolated) || !place.root
+          ? {}
+          : { root: place.root }),
+      };
       const { cwd: workspace, home } = await this.conversationPlace(
         reads.scope,
         agent.key,
-        {
-          channelId: place.channelId,
-          ...((settings.scope === "channel" && !place.isolated) || !place.root
-            ? {}
-            : { root: place.root }),
-        },
+        conversation,
         settings,
       );
       if (workspace !== thread.workspace)
@@ -874,6 +877,7 @@ export class CodexRuntime {
         {},
         undefined,
         home,
+        sessionPlace(conversation),
       );
       try {
         signal.throwIfAborted();
@@ -2684,6 +2688,8 @@ export class CodexRuntime {
         workspace,
         {},
         delivery.synced,
+        undefined,
+        "standalone",
       );
       hookBridge = bridge;
       const text = await prompt();
@@ -3428,6 +3434,8 @@ export class CodexRuntime {
     synced?: Delivery["synced"],
     /** The agent's workspace, when `workspace` is the conversation's folder. */
     home?: string,
+    /** What the thread is, for its Session Model. */
+    place?: Facts["place"],
   ) {
     const normalized = await rpc.request<{
       config: {
@@ -3469,7 +3477,12 @@ export class CodexRuntime {
     const params = {
       model,
       cwd: workspace,
-      developerInstructions: developerInstructions(agent, home),
+      developerInstructions: developerInstructions(
+        agent,
+        settings.scope,
+        home,
+        place,
+      ),
       approvalPolicy: "never",
       // Matches Claude's bypassPermissions; only the owner's mentions and the
       // agent's own watches and timers start work.
@@ -3526,6 +3539,7 @@ export class CodexRuntime {
       request,
       request.synced,
       home,
+      sessionPlace(request.conversation),
     );
     if (voiceInstructions) {
       Object.assign(params.config, {
