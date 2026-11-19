@@ -476,6 +476,7 @@ function mount(
                   subscribe: () => () => {},
                   snapshot: () => undefined,
                   attention: () => ({ unread: false }),
+                  threadReadThrough: () => 0,
                 } as unknown as RelaySession["unread"],
                 thread: () => {
                   const snapshot = {
