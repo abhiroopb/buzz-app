@@ -1163,6 +1163,9 @@ export type AgentType<Config = unknown> = {
    * missing. `sessions` lists each conversation that has a session, which
    * then gets no folder. Without it, its agents' conversations get none. */
   conversationFolders?: true;
+  /** Up to 8 folders, as `local_skills_list` resolves them, whose
+   * `<name>/SKILL.md` skills the composer's `/` offers for its local agents. */
+  skillFolders?: readonly string[];
   /** Why protected runs must stop when this runtime cannot enforce the contract. */
   protectionUnavailable?: string;
   /** Fully retires native sessions for this membership key before policy changes. */

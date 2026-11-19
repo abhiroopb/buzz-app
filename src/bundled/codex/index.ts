@@ -173,6 +173,7 @@ export const apply: PluginModule["apply"] = (ctx) => {
   ctx.agents.register<Config>({
     id: TYPE_ID,
     conversationFolders: true,
+    skillFolders: ["$CODEX_HOME/skills", "~/.agents/skills"],
     voice: async (seat) => {
       if (typeof RTCPeerConnection !== "function")
         throw new Error("Voice is unsupported on this device");
