@@ -230,8 +230,10 @@ including empty pages whose raw scan cursor does not occur among delivered event
 
 Strict root admission/validation runs once before each load or refresh traversal,
 not between the pages of a retained-range repair: repairing N pages uses one root
-read plus N independently verified window reads. Each separate scrollback load
-still reads the root. Root deletion observed live and access revocation retain their
+read plus N independently verified window reads. A load given a read frontier
+pages until it reaches a reply at or before that time the same way, so the
+older paging that reaches the first unread reply reads the root once. Each separate scrollback
+load still reads the root. Root deletion observed live and access revocation retain their
 existing session paths; a later refresh/load revalidates the root. Neither the root
 lookup nor the page sequence provides an atomic snapshot.
 
@@ -372,12 +374,12 @@ which it is true when it arrived, kept while the event waits, so watches do not
 change who a mention wakes; they still hear the rest. A channel leaves the
 agents-only set once a lookup of the viewer's own succeeds, not when it starts:
 an exact lookup marked `viewerLookup` (a name search, a label lookup, a mounted
-link, a search read, or any `session.channels.resolve` call, which only the
-viewer's own surfaces make) reports through `resolved`, and so does a mounted link
+link, a search read, or a `session.channels.resolve` call with its default viewer lookup) reports through `resolved`, and so does a mounted link
 to a channel already known, which needs no lookup: links hold their demand
 even when readable. Rechecks, such as preview
 revalidation after an access-revoked CLOSED or a member-added confirmation,
-leave it as it was.
+leave it as it was. Watch admission calls `session.channels.resolve` with
+`viewerLookup: false`, preserving agent-only provenance instead of promoting the channel into viewer mention traffic.
 Shared composers and reactions remain unavailable for nonmembers; message helpers
 and workflows do not acquire write eligibility from public metadata. The relay
 remains the final write authority, including low-level outbox intent.
