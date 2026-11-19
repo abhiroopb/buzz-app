@@ -152,6 +152,8 @@ export interface BuzzClient {
    * cannot tell yet. Unless it says yes, a conversation with no thread is the
    * whole channel. */
   threadsApart?(channel: string): boolean | undefined;
+  /** An exact, saved task anchor for this agent. */
+  isTaskThread?(channel: string, root: string): boolean;
   /** The agent's owner, as its host records it. */
   readonly owner?: string | undefined;
   /** Trusted connection authorities, never inferred from query results. */

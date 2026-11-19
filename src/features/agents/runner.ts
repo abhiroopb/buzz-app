@@ -580,6 +580,7 @@ export type RunnerHost = {
   handoff(agent: Agent, handoff: AgentHandoff): void;
   /** Whether the agent's threads in the channel have sessions of their own. */
   threadsApart?(agent: Agent, channelId: string): boolean | undefined;
+  isTaskThread?(agent: Agent, channelId: string, root: string): boolean;
   /** The instructions plugins give the agent's turns now. */
   instructions?(
     agent: Agent,
@@ -3389,6 +3390,10 @@ export class AgentRunners {
           threadsApart: (channelId: string) => {
             lifetime.throwIfAborted();
             return this.host.threadsApart?.(agent, channelId);
+          },
+          isTaskThread: (channelId: string, root: string) => {
+            lifetime.throwIfAborted();
+            return this.host.isTaskThread?.(agent, channelId, root) ?? false;
           },
           // The control outlives this call, so each of its calls checks the
           // run's lifetime, and set again once it has read the agents.

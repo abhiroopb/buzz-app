@@ -1,4 +1,4 @@
-import { subthreadEvents } from "../relay/subthread";
+import { readSubthread } from "../relay/subthread";
 // The Buzz side of an agent turn, for a harness a plugin brings: whether a
 // delivery is the harness's to act on and which conversation it goes to, the
 // prompts the bundled harnesses give, the agent's Buzz tools as an MCP
@@ -343,6 +343,7 @@ export function harnessKit(sources: Sources): HarnessKit {
       let earlier: readonly EventData[] = [];
       if (ready && (thread || dm || topLevel || resumed))
         try {
+          const signal = AbortSignal.timeout(CONVERSATION_READ_TIMEOUT_MS);
           const events = await ready.read(
             threadRead
               ? [
@@ -366,7 +367,7 @@ export function harnessKit(sources: Sources): HarnessKit {
                   },
                 ]
               : [{ kinds: CHAT, "#h": [channelId], limit: CONTEXT_LIMIT + 1 }],
-            { signal: AbortSignal.timeout(CONVERSATION_READ_TIMEOUT_MS) },
+            { signal },
           );
           earlier = events
             .filter(
@@ -379,17 +380,22 @@ export function harnessKit(sources: Sources): HarnessKit {
                 (resumed || item.created_at <= event.created_at),
             )
             .sort((a, b) => a.created_at - b.created_at);
+          const { root, sourceRoot } = conversation;
+          if (root && sourceRoot && event.id !== root) {
+            earlier = (
+              await readSubthread(
+                earlier,
+                { channel: channelId, root: sourceRoot, anchor: root },
+                CHAT,
+                (filters) => ready.read(filters, { signal }),
+              )
+            ).events;
+          }
         } catch (error) {
+          earlier = [];
           console.warn("A harness could not read the conversation", error);
         }
-      // A session already has its own replies; a new one is shown them too.
-      const history =
-        conversation.sourceRoot &&
-        conversation.root &&
-        event.id !== conversation.root
-          ? subthreadEvents(earlier, conversation.root ?? event.id)
-          : earlier;
-      const unseen = history.filter(
+      const unseen = earlier.filter(
         (item) =>
           item.created_at > since && (!since || item.pubkey !== agent.pubkey),
       );

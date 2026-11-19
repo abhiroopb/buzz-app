@@ -1,4 +1,4 @@
-import { subthreadEvents } from "../../features/relay/subthread";
+import { readSubthread } from "../../features/relay/subthread";
 import { protectionTranscript } from "./protection-transcript";
 import type { PRESET } from "../../features/agents/recommended";
 import { fileStore } from "../../features/agents/state";
@@ -1147,6 +1147,7 @@ export class ClaudeRuntime {
             : lifetime;
           await runtime.run({
             ...delivery,
+            routeConversation: async () => route,
             ...(session ? { session } : {}),
             ...(sessionContext ? { sessionContext } : {}),
             signal: accepted,
@@ -1556,6 +1557,7 @@ export class ClaudeRuntime {
     // A chat its owner is still creating has nothing earlier to read.
     if (reads && !summary?.starting && (thread || dm || topLevel))
       try {
+        const budget = AbortSignal.timeout(CONVERSATION_READ_TIMEOUT_MS);
         const events = await reads.read(
           thread && !topLevel
             ? [
@@ -1567,7 +1569,7 @@ export class ClaudeRuntime {
                 { kinds: CHAT, "#h": [channelId], "#e": [rootId], limit: 200 },
               ]
             : [{ kinds: CHAT, "#h": [channelId], limit: CONTEXT_LIMIT + 1 }],
-          AbortSignal.timeout(CONVERSATION_READ_TIMEOUT_MS),
+          budget,
         );
         earlier = events
           .filter(
@@ -1580,15 +1582,21 @@ export class ClaudeRuntime {
               item.created_at <= event.created_at,
           )
           .sort((a, b) => a.created_at - b.created_at);
+        if (route && event.id !== route.parent) {
+          earlier = (
+            await readSubthread(
+              earlier,
+              { channel: channelId, root: route.root, anchor: route.parent },
+              CHAT,
+              (filters) => reads.read(filters, budget),
+            )
+          ).events;
+        }
       } catch (error) {
+        earlier = [];
         console.warn("Claude could not read the conversation", error);
       }
-    // A session already has its own replies; a new one is shown them too.
-    const history =
-      route && event.id !== route.parent
-        ? subthreadEvents(earlier, route.parent)
-        : earlier;
-    const unseen = history.filter(
+    const unseen = earlier.filter(
       (item) =>
         item.created_at > seen && (!seen || item.pubkey !== agent.pubkey),
     );

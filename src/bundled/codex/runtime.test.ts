@@ -7670,12 +7670,17 @@ async function heldRemoteNew(readyReads: ReturnType<typeof vi.fn>) {
   } as unknown as RelayData;
   const reads = ownerReads(replacement, pubkey);
   Object.assign(f.runtime, { readyReads });
-  const first = f.delivery("first");
+  const invocation = "d".repeat(64);
+  const placement = { root, parent: invocation };
+  const first = {
+    ...f.delivery("first"),
+    routeConversation: vi.fn(async () => placement),
+  };
   await f.runtime.run(first);
   await vi.waitFor(() => expect(guests[0]?.starts()).toHaveLength(1));
   await guests[0]?.complete();
   const agent = { ...first.agent, config: first.config } as unknown as Agent;
-  const place = { channelId: "channel", root };
+  const place = { channelId: "channel", root: invocation };
   await vi.waitFor(() =>
     expect(f.runtime.sessionState(agent, place)).toBe("idle"),
   );
@@ -7692,6 +7697,10 @@ async function heldRemoteNew(readyReads: ReturnType<typeof vi.fn>) {
     return { released, reset };
   };
   const handoffs: Promise<unknown>[] = [];
+  const resolveRoute = vi.fn(async (signal: AbortSignal) => {
+    signal.throwIfAborted();
+    return placement;
+  });
   const workflow = (signal: AbortSignal) =>
     f.runtime.run({
       ...f.delivery("@Codex workflow"),
@@ -7713,6 +7722,7 @@ async function heldRemoteNew(readyReads: ReturnType<typeof vi.fn>) {
         ),
       },
       signal,
+      routeConversation: () => resolveRoute(signal),
       workingUntil: (work: Promise<unknown>) => void handoffs.push(work),
     });
   return {
@@ -7724,6 +7734,7 @@ async function heldRemoteNew(readyReads: ReturnType<typeof vi.fn>) {
     holdNew,
     handoffs,
     workflow,
+    resolveRoute,
   };
 }
 
@@ -7773,6 +7784,7 @@ it("gives a workflow mention held behind a remote New a fresh hand-over deadline
     await guest()?.complete();
     await held.handoffs[1];
     await vi.waitFor(() => expect(held.f.publish).toHaveBeenCalledTimes(2));
+    expect(held.resolveRoute).toHaveBeenCalledTimes(2);
   } finally {
     budgets.restore();
     await held.f.runtime.retire(pubkey);

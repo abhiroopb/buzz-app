@@ -1856,6 +1856,7 @@ export class CodexRuntime {
             : lifetime;
           await runtime.run({
             ...delivery,
+            routeConversation: async () => route,
             ...(admitted
               ? { session: admitted.session, sessionContext: admitted.context }
               : {}),

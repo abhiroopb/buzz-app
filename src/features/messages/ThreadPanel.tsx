@@ -529,6 +529,7 @@ function OwnedThreadPanel({
       revealFocus={revealFocus}
       unreadRequest={unreadRequest}
       requireReadyRoot={requireReadyRoot}
+      subthreadId={subthreadId}
       onDraftSaved={onDraftSaved}
       onSend={onSend}
       onOpenLink={onOpenLink}
@@ -563,6 +564,7 @@ function ThreadMessages({
   revealRequest,
   unreadRequest,
   requireReadyRoot,
+  subthreadId,
   onDraftSaved,
   onSend,
   selectionFailure,
@@ -570,6 +572,7 @@ function ThreadMessages({
   routePending,
 }: {
   intro?: ReactNode;
+  subthreadId?: string | undefined;
   onResolvedRoot?: ThreadPanelProps["onResolvedRoot"];
   /** A route to this reader is on its way: until it lands, a reader not yet
    * shown stays hidden and unread rather than showing a place the route
@@ -2056,10 +2059,9 @@ function ThreadMessages({
         // exact reply under an unavailable original shows alone, so it, not
         // its signed root, is the thread: its hidden siblings stay unread.
         rootId={snapshot.root?.id ?? messageId}
-        // A visible exact reply can outlive its unavailable root. Until resolved,
-        // observe rows individually; an absent root must not mean channel catch-up.
+        // Projected branches and replies with unavailable roots only mark visible rows.
         latestMessageId={
-          snapshot.root
+          snapshot.root && !subthreadId
             ? snapshot.replies.reduce<ChannelMessage | undefined>(
                 (latest, row) =>
                   !latest || row.createdAt > latest.createdAt ? row : latest,

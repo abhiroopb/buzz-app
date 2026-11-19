@@ -3138,7 +3138,7 @@ function Composer({
             content,
             undefined,
             {
-              ...(threadRootId ? { rootId: threadRootId } : {}),
+              ...(threadRootId ? { rootId: sourceRootId ?? threadRootId } : {}),
               ...(replyParentId ? { parentId: replyParentId } : {}),
               ...(mediaTargetUrl ? { mediaTargetUrl } : {}),
               mentions: recipients,

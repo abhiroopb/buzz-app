@@ -1,4 +1,4 @@
-import { subthreadEvents } from "../../features/relay/subthread";
+import { readSubthread } from "../../features/relay/subthread";
 import { readAuthorNames } from "../../features/agent-harness/author-names";
 import { quoted, withNames } from "../../features/agent-harness/turn-records";
 import { attestedOwner } from "../../features/agents/owner-attestation";
@@ -53,7 +53,14 @@ export async function conversationHistory(
   // so history agrees with the conversation rather than reviving replaced text.
   const history =
     conversation.sourceRoot && root && event.id !== root
-      ? subthreadEvents(found, root)
+      ? (
+          await readSubthread(
+            found,
+            { channel: channelId, root: conversation.sourceRoot, anchor: root },
+            filter.kinds,
+            read,
+          )
+        ).events
       : found;
   const earlier = history.filter(
     (item) =>

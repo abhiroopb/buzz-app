@@ -8,6 +8,7 @@ import {
   type AgentSessionRouter,
 } from "./session-admission";
 import { memoryStorage } from "./test-fakes";
+import { keypair, message } from "../relay/testing";
 
 const roots: Context[] = [];
 afterEach(async () => {
@@ -203,11 +204,33 @@ it("does not save failed routing or move an invocation admitted before routing",
   await expect(f.admissions.route(request("retry"))).rejects.toThrow(
     "not published",
   );
-  expect(await f.admissions.route(request("retry"))).toEqual({
+  expect(
+    await f.admissions.route({ ...request("retry"), resumed: true }),
+  ).toEqual({
     root: source.root,
     parent: "d".repeat(64),
   });
   await f.admissions.prepare(request("legacy"));
   expect(await f.admissions.route(request("legacy"))).toBeUndefined();
   expect(route).toHaveBeenCalledTimes(2);
+});
+
+it("keeps an interrupted native turn in place after a router is enabled", async () => {
+  const native = await setup();
+  const event = message(keypair(), source.channelId, "Work", 100);
+  const interrupted = { ...request(event.id), event };
+  expect(await native.admissions.route(interrupted)).toBeUndefined();
+
+  const placement = { root: source.root, parent: "d".repeat(64) };
+  const route = vi.fn(async () => placement);
+  const restored = await setup({ route }, native.storage);
+  expect(
+    await restored.admissions.route({
+      ...interrupted,
+      resumed: true,
+    }),
+  ).toBeUndefined();
+  expect(await restored.admissions.route(interrupted)).toBeUndefined();
+  expect(route).not.toHaveBeenCalled();
+  expect(await restored.admissions.route(request("fresh"))).toEqual(placement);
 });

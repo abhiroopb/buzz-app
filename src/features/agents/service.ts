@@ -580,6 +580,7 @@ export type AgentHandle = Readonly<{
    * so a handoff from that conversation into a thread reaches another;
    * undefined while the channel is not known here yet. */
   threadsApart?(channel: string): boolean | undefined;
+  isTaskThread?(channel: string, root: string): boolean;
   /** Rechecks an operation lifetime after channel startup, before signing. */
   publish(
     event: AgentEventTemplate,
@@ -2788,6 +2789,11 @@ export class AgentsService extends Service implements Agents {
       handoff: (agent, { from, ...wake }) =>
         this.wakeIn(agent.key, wake, { from }),
       threadsApart: (agent, channelId) => this.threadsApart(agent, channelId),
+      isTaskThread: (agent, channelId, root) =>
+        this.sessionAdmissions.routed(agent.key, agent.type, {
+          channelId,
+          root,
+        }),
       instructions: (agent) => this.turnInstructions(agent),
       conversationInstructions: (agent, channelId, root) =>
         this.turnConversationInstructions(agent, channelId, root),

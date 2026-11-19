@@ -1,4 +1,5 @@
 import type { ChannelMessage } from "./contracts";
+import type { ReadFilter } from "./events";
 import { threadReference } from "./thread-reference";
 
 function descendants(
@@ -18,18 +19,51 @@ function descendants(
   return ids;
 }
 
-/** Only established ancestry belongs to a branch. Missing parents stay hidden. */
-export function subthreadEvents<
-  T extends { id: string; tags: readonly (readonly string[])[] },
->(events: readonly T[], anchor: string) {
-  const ids = descendants(
-    events.map((event) => ({
-      id: event.id,
-      parent: threadReference(event)?.parentId,
-    })),
+/** Use exact ancestor reads as evidence without changing the page or its cursor. */
+export async function readSubthread<
+  T extends { id: string; kind: number; tags: readonly (readonly string[])[] },
+>(
+  events: readonly T[],
+  { channel, root, anchor }: { channel: string; root: string; anchor: string },
+  kinds: readonly number[],
+  read: (filters: readonly ReadFilter[]) => Promise<readonly T[]>,
+) {
+  const parents = new Map<string, string>();
+  const inThread = (event: T) =>
+    kinds.includes(event.kind) &&
+    event.tags.some(([name, value]) => name === "h" && value === channel);
+  function record(event: T) {
+    const reference = threadReference(event);
+    if (event.id !== anchor && reference?.rootId === root && inThread(event))
+      parents.set(event.id, reference.parentId);
+  }
+  events.forEach(record);
+  const missing = () =>
+    [...new Set(parents.values())].filter(
+      (id) => id !== anchor && id !== root && !parents.has(id),
+    );
+  const requested = new Set<string>();
+  // Bound both round trips and total IDs for wide pages and deep reply chains.
+  for (let round = 0; round < 4 && requested.size < 32; round++) {
+    const ids = missing()
+      .filter((id) => !requested.has(id))
+      .slice(0, 32 - requested.size);
+    if (!ids.length) break;
+    for (const id of ids) requested.add(id);
+    const expected = new Set(ids);
+    for (const event of await read([
+      { ids, kinds: [...kinds], "#h": [channel], limit: ids.length },
+    ]))
+      if (expected.has(event.id)) record(event);
+  }
+  const members = descendants(
+    Array.from(parents, ([id, parent]) => ({ id, parent })),
     anchor,
   );
-  return events.filter((event) => ids.has(event.id));
+  return {
+    events: events.filter((event) => members.has(event.id) && inThread(event)),
+    incomplete: missing().length > 0,
+  };
 }
 
 export function subthreadMessages(

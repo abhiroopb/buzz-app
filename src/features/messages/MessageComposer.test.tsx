@@ -1933,6 +1933,7 @@ function attachByDrop(target: HTMLElement, file = attachmentFile()) {
 async function mountUploadComposer(
   options: {
     threadRootId?: string;
+    sourceRootId?: string;
     sourceMessages?: boolean;
     sourcePrivacy?: "private" | "dm" | "solo" | "public";
     destination?: string;
@@ -2093,6 +2094,7 @@ async function mountUploadComposer(
           {...(options.threadRootId
             ? { threadRootId: options.threadRootId }
             : {})}
+          sourceRootId={options.sourceRootId}
           {...(options.replyParentId
             ? { replyParentId: options.replyParentId }
             : {})}
@@ -17374,15 +17376,22 @@ it("shows an annotator's marks in the composer and retires them with the destina
   );
 });
 
-it.each([false, true])(
-  "pastes a source locator, preserves the card while typing, and forwards through normal send (thread=%s)",
-  async (thread) => {
+it.each(["channel", "thread", "task"])(
+  "pastes a source locator, preserves the card while typing, and forwards into a %s",
+  async (target) => {
     const root = "b".repeat(64);
-    const h = await mountUploadComposer(
-      thread
-        ? { threadRootId: root, sourceMessages: true }
-        : { sourceMessages: true },
-    );
+    const invocation = "c".repeat(64);
+    const h = await mountUploadComposer({
+      sourceMessages: true,
+      ...(target === "thread" ? { threadRootId: root } : {}),
+      ...(target === "task"
+        ? {
+            threadRootId: invocation,
+            sourceRootId: root,
+            replyParentId: invocation,
+          }
+        : {}),
+    });
     const id = h.owner.session.messages.send("channel", "Original **message**");
     await waitFor(() => expect(h.publish).toHaveBeenCalledOnce());
     const { forwardClipboard } = await import("./forward-clipboard");
@@ -17422,7 +17431,13 @@ it.each([false, true])(
       "Original **message**",
     );
     expect(event && readForward(event)?.note).toBe("My note");
-    if (thread) expect(event?.tags).toContainEqual(["e", root, "", "reply"]);
+    if (target === "thread")
+      expect(event?.tags).toContainEqual(["e", root, "", "reply"]);
+    if (target === "task")
+      expect(event?.tags.filter(([name]) => name === "e")).toEqual([
+        ["e", root, "", "root"],
+        ["e", invocation, "", "reply"],
+      ]);
     await waitFor(() =>
       expect(
         screen.queryByRole("button", { name: "Remove forwarded message" }),
