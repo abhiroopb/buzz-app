@@ -8736,6 +8736,40 @@ it("does not start a native turn or publish when task routing rejects", async ()
   expect(f.publish).not.toHaveBeenCalled();
 });
 
+it("stops a routed community request before Codex starts the turn", async () => {
+  const f = fixture();
+  const delivery = f.delivery("Run the task");
+  const { config } = scoped(delivery);
+  const entered = deferred<void>();
+  const gate = deferred<void>();
+  const interruptible = vi.fn<NonNullable<Delivery["interruptible"]>>();
+  const running = f.runtime.run({
+    ...delivery,
+    config,
+    interruptible,
+    routeConversation: async () => ({ root, parent: "d".repeat(64) }),
+    prepareSession: async () => {
+      entered.resolve();
+      await gate.promise;
+      return undefined;
+    },
+  });
+  try {
+    await entered.promise;
+    const stop = interruptible.mock.calls[0]?.[0];
+    if (!stop) throw new Error("Expected a request stop control");
+    const stopping = expect(stop()).resolves.toBeUndefined();
+    gate.resolve();
+    await Promise.all([running, stopping]);
+    expect(f.sent.some((wire) => wire.method === "thread/start")).toBe(false);
+    expect(f.starts()).toEqual([]);
+    expect(f.publish).not.toHaveBeenCalled();
+  } finally {
+    gate.resolve();
+    await Promise.allSettled([running]);
+  }
+});
+
 it("shares a community session across channels and Solo chats while retaining each reply destination", async () => {
   const f = fixture();
   const community = (text: string, channel = "channel") => {

@@ -2313,7 +2313,9 @@ export class CodexRuntime {
         (request.model && request.model !== targetModel) ||
         (request.effort && request.effort !== targetEffort));
     entry.waiting.add(request);
-    delivery.interruptible?.(() => this.interrupt(entry, key, request));
+    delivery.interruptible?.(() =>
+      this.interrupt(entry, key, request, reserved),
+    );
     const handoff = this.controls.deliver(
       `${agent.key}/${key}`,
       async (deferred) => {
@@ -2321,6 +2323,12 @@ export class CodexRuntime {
         if (deferred) entry.abort.signal.throwIfAborted();
         else delivery.signal.throwIfAborted();
         const admitted = await admission(deferred);
+        if (reserved && delivery.signal.aborted) {
+          request.current = () => false;
+          entry.waiting.delete(request);
+          request.answered(true);
+          return;
+        }
         if (admitted) {
           request.session = admitted.session;
           if (admitted.context !== undefined)
@@ -2757,15 +2765,18 @@ export class CodexRuntime {
     entry: Entry,
     key: string,
     request: Request,
+    canStopWaiting = request.settings.scope === "community",
   ): Promise<void> {
     if (entry.waiting.has(request)) {
-      if (request.settings.scope !== "community")
+      if (!canStopWaiting)
         return Promise.reject(
           new Error("Codex has not started on this message yet"),
         );
       // Codex is still deciding on its steer: stop the turn it joins, or drop it.
       if (request.steering)
-        return request.steering.then(() => this.interrupt(entry, key, request));
+        return request.steering.then(() =>
+          this.interrupt(entry, key, request, canStopWaiting),
+        );
       request.current = () => false;
       request.answered(true);
       return Promise.resolve();

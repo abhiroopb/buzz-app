@@ -1259,6 +1259,7 @@ export class ClaudeRuntime {
     let delivered!: Promise<Settled>;
     let interrupted = false;
     let submitted = false;
+    const stopped = () => interrupted || (reserved && signal.aborted);
     // Keep an idle process available until delivery takes over.
     const arriving = entry.sessions.incoming(key);
     const handoff = this.controls.deliver(
@@ -1290,7 +1291,7 @@ export class ClaudeRuntime {
             topLevel,
             fresh,
             solo,
-            () => !interrupted && (!current || current()),
+            () => !stopped() && (!current || current()),
             route,
           );
           acceptProject = turn.acceptProject;
@@ -1314,12 +1315,12 @@ export class ClaudeRuntime {
         // the other policy waits for the conversation's turns to settle rather
         // than steering into them and changing their tools' context.
         await wait;
-        if (interrupted) {
+        if (stopped()) {
           delivered = Promise.resolve({ ok: true });
           return;
         }
         const { text: prepared, contextRoot } = await prompt(false);
-        if (interrupted) {
+        if (stopped()) {
           delivered = Promise.resolve({ ok: true });
           return;
         }
@@ -1357,7 +1358,7 @@ export class ClaudeRuntime {
         };
         submitted = true;
         delivered = entry.sessions.deliver(key, text, event.created_at, {
-          current: () => !interrupted && (!current || current()),
+          current: () => !stopped() && (!current || current()),
           ...(wake
             ? {
                 refresh: async (fresh = false) => {
@@ -1418,9 +1419,7 @@ export class ClaudeRuntime {
     const done = handed.then(
       async () => {
         const result = await delivered;
-        return key === COMMUNITY_SESSION &&
-          interrupted &&
-          (!submitted || result.undelivered)
+        return reserved && interrupted && (!submitted || result.undelivered)
           ? { ...result, ok: false, stopped: true as const }
           : result;
       },
@@ -1456,15 +1455,15 @@ export class ClaudeRuntime {
       entry.policies.delete(key);
       this.notify();
     });
+    interruptible?.(() => {
+      interrupted = true;
+      return submitted ? entry.sessions.interrupt(key) : Promise.resolve();
+    });
     // Deliveries keep their order: a later one waits on this handover, and
     // one with nothing to wait for is handed over before `run` returns.
     if (!wait && !handoff.deferred && !admittedDeferred) await handed;
     // The turn outlives `run`, which the host is told so it shows it as working.
     workingUntil(done);
-    interruptible?.(() => {
-      interrupted = true;
-      return submitted ? entry.sessions.interrupt(key) : Promise.resolve();
-    });
     this.notify();
     this.watch(done, async (error) => {
       if (error)

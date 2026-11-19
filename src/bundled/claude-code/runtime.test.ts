@@ -2345,6 +2345,49 @@ it("restores direct and nested task corrections for a rooted wake", async () => 
   expect(prompt).not.toContain("UNRELATED_DISCUSSION");
 });
 
+it("stops a routed community wake before Claude receives its prompt", async () => {
+  const f = setup();
+  const root = "1".repeat(64);
+  const parent = "2".repeat(64);
+  const entered = Promise.withResolvers<void>();
+  const gate = Promise.withResolvers<void>();
+  const config = { ...DEFAULT_CONFIG, scope: "community" as const };
+  const routeConversation = async () => ({ root, parent });
+  const prompts = () => f.claudes().flatMap((process) => process.prompts);
+  await f.deliver(pluginWake(parent), { config, routeConversation });
+  await Promise.all(f.workingUntil.mock.calls.map(([done]) => done));
+  const firstPrompts = prompts();
+  expect(firstPrompts.length).toBeGreaterThan(0);
+  f.interruptible.mockClear();
+  f.workingUntil.mockClear();
+  const running = f.deliver(pluginWake(parent), {
+    config,
+    routeConversation,
+    prepareSession: async () => {
+      entered.resolve();
+      await gate.promise;
+      return undefined;
+    },
+  });
+  try {
+    await entered.promise;
+    const stop = f.interruptible.mock.calls[0]?.[0];
+    if (!stop) throw new Error("Expected a request stop control");
+    const stopping = expect(stop()).resolves.toBeUndefined();
+    gate.resolve();
+    await Promise.all([running, stopping]);
+    const outcomes = await Promise.all(
+      f.workingUntil.mock.calls.map(([done]) => done),
+    );
+    expect(prompts()).toEqual(firstPrompts);
+    expect(outcomes).toContainEqual({ ok: false, stopped: true });
+  } finally {
+    gate.resolve();
+    await Promise.allSettled([running]);
+    f.runtime.dispose();
+  }
+});
+
 it("reports a failed wake at its thread's root, never at the wake's own id", async () => {
   const root = "1".repeat(64);
   const { runtime, deliver, published, claudes } = setup();
