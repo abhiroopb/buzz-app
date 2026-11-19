@@ -14,6 +14,7 @@ import {
   sessionSource,
 } from "../../features/agent-harness/session-scope";
 import { protectionTranscript } from "./protection-transcript";
+import { compactAt } from "../../features/agents/compact-at";
 import type { PRESET } from "../../features/agents/recommended";
 import { fileStore } from "../../features/agents/state";
 import type { AgentExecution } from "../../features/agents/execution";
@@ -134,6 +135,9 @@ export type Config = Readonly<{
   workspace: string;
   /** Whether each thread is its own session, or the whole channel is one. */
   scope: Scope;
+  /** The context size, in tokens, its sessions compact at; unset is
+   * Claude's own. This device's only. */
+  compactAt?: string;
   /** On Recommended, whose model and thinking level runs replace these. */
   preset?: typeof PRESET;
 }>;
@@ -193,8 +197,13 @@ type Entry = {
   policies: Map<
     string,
     {
-      topLevel: boolean;
+      solo: boolean;
       steerable?(model?: string, effort?: string): boolean;
+      /** The running turn's effective model and effort picks. */
+      picks?: Readonly<{
+        model?: string | undefined;
+        effort?: string | undefined;
+      }>;
       handed: Promise<unknown>;
       settled: Promise<unknown>;
       cancel(): void;
@@ -202,12 +211,17 @@ type Entry = {
   >;
 };
 
-/** Where an agent's processes run, and with which model and effort. */
-const where = ({ workspace, model, effort }: Config) => ({
-  cwd: workspace,
-  ...(model.trim() ? { model: model.trim() } : {}),
-  ...(effort ? { effort } : {}),
-});
+/** Where an agent's processes run, and with which model, effort and
+ * compaction. */
+const where = ({ workspace, model, effort, ...config }: Config) => {
+  const tokens = compactAt(config.compactAt);
+  return {
+    cwd: workspace,
+    ...(model.trim() ? { model: model.trim() } : {}),
+    ...(effort ? { effort } : {}),
+    ...(tokens ? { compactAt: tokens } : {}),
+  };
+};
 
 /** How Claude lists the session tools: in full up front only those marked
  * `alwaysLoad`, and the rest by name until its tool search loads them, with
@@ -1226,11 +1240,14 @@ export class ClaudeRuntime {
       return handoff.done;
     }
     const prior = entry.policies.get(key);
+    // A turn keeps the posting policy it was admitted with: a request in a
+    // Solo chat shared since, or the reverse, waits for its turns to settle
+    // rather than steering into them and changing their tools' context.
     const same =
       key === COMMUNITY_SESSION
         ? entry.config.scope === "community" &&
           prior?.steerable?.(model, effort) === true
-        : prior?.topLevel === topLevel;
+        : prior?.solo === solo;
     const wait =
       key === COMMUNITY_SESSION || entry.policies.has(COMMUNITY_SESSION)
         ? Promise.all(
@@ -1292,9 +1309,6 @@ export class ClaudeRuntime {
                 : text,
           };
         };
-        // A turn keeps the posting policy it was admitted with: a request under
-        // the other policy waits for the conversation's turns to settle rather
-        // than steering into them and changing their tools' context.
         await wait;
         if (interrupted) {
           delivered = Promise.resolve({ ok: true });
@@ -1413,13 +1427,21 @@ export class ClaudeRuntime {
     void done.then(() => {
       foregroundDone = true;
     });
+    // A steer without a pick runs on the turn's own picks.
+    const picks = same
+      ? {
+          model: model ?? prior?.picks?.model,
+          effort: effort ?? prior?.picks?.effort,
+        }
+      : { model, effort };
     const policy = {
-      topLevel,
+      solo,
       steerable: (nextModel?: string, nextEffort?: string) =>
         !interrupted &&
         !foregroundDone &&
-        (!nextModel || nextModel === model) &&
-        (!nextEffort || nextEffort === effort),
+        (!nextModel || nextModel === picks.model) &&
+        (!nextEffort || nextEffort === picks.effort),
+      picks,
       cancel() {
         interrupted = true;
         prior?.cancel();
@@ -1890,7 +1912,7 @@ export class ClaudeRuntime {
       (cwd: string): ToolServer =>
       async (conversation, message, signal, check) => {
         const handle = entry.handle;
-        const client =
+        const client = () =>
           handle &&
           appClient(handle, {
             // Its PreToolUse hook reviews every tool, Buzz's included.
@@ -1996,6 +2018,7 @@ export class ClaudeRuntime {
           this.reads(agent) ? this.folder(agent, key) : undefined,
           entry.config.model,
           entry.config.effort,
+          entry.config.compactAt,
           entry.config.workspace,
           entry.config.instructions,
           entry.config.scope,

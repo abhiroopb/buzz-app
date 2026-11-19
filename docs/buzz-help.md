@@ -655,6 +655,8 @@ and are asked to sign in again in Buzz.
   reply to you that arrives after you leave lights the row again, as does any
   newer message; **Mark as unread** still shows on it. On another device, rows
   with unread mentions, DMs or replies to you light again until you read them.
+- **Mark as unread** on a thread you have open keeps it unread while you stay
+  in it. Reading to the bottom on a later visit, or marking it read, clears it.
 - **Communities** have their own channels, people, and agents. Switch with
   the community switcher at the bottom of the dock; in **Personal space**,
   Messages offers **Choose a community**, which opens it. Switching
@@ -746,8 +748,11 @@ and are asked to sign in again in Buzz.
   to exactly the same people. Its earlier messages appear before you send,
   without being marked read. Sending a message reopens the DM and brings it
   back to the sidebar. For a one-to-one DM, choosing the person in search is
-  quicker and brings it back the same way. After **Hide conversation**, the row
-  can take until the channel list next refreshes to return. If this connection
+  quicker and brings it back the same way. A new message from someone else in
+  the DM also brings it back, including one that arrived while you were
+  offline, once you reconnect. Messages only for agents don't. After **Hide
+  conversation**, the row can take until the channel list next refreshes to
+  return. If this connection
   can't start DMs, New message still shows the earlier messages but Send is
   disabled, and search opens a one-to-one DM without bringing it back.
 - **Message link previews** appear when you hover or focus a Buzz message link.
@@ -768,7 +773,10 @@ and are asked to sign in again in Buzz.
 - **Message search** treats the last word you type as the start of a word, so
   it searches only once that word has at least three characters, even with
   `from:` or `in:`. A shorter last word shows how many characters to type, not
-  "no results". Filters narrow it, alone or with text:
+  "no results". Filters narrow it, alone or with text. **Filters** in the
+  search field, or `?` typed in an empty field, lists them in plain words
+  with examples: choose one to add it and open its picker, or try an example
+  from the preview. Escape goes back to the results.
   - `from:me`, `from:@name`: messages by you or someone else.
   - `in:#channel`, `in:@person`: one channel, or your DM with someone
     (`in:@me` is your own). A name that matches several conversations, or
@@ -806,14 +814,16 @@ and are asked to sign in again in Buzz.
   phrase. Each message shows the words around the match. A panel beside the
   results previews the highlighted row: the message with the ones just before
   and after it, or a channel's or person's latest messages. Up and Down move
-  the highlight; add your own keys under **Previous search result** and
-  **Next search result** in Settings → Shortcuts, for example ⌃K and ⌃J on a
-  Mac, and the key hints show them. Up and Down keep working. Tab and Shift+Tab,
-  or the group filter buttons above the results, show one group whole, as
-  does choosing a group's heading when it has more; Escape goes back. Groups
-  reorder as slower results arrive until you move the highlight; after that
-  they stay put and later groups join at the end. The panel and key hints hide
-  in narrow windows.
+  the highlight, as do Control+J or Control+N and Control+K or Control+P on
+  every platform, a Mac included; add your own keys under **Previous search
+  result** and **Next search result** in Settings → Shortcuts, and the key
+  hints show them. Up and Down keep working. Tab, Control+L or Control+F
+  shows the next group whole and Shift+Tab, Control+H or Control+B the
+  previous one, as do the group filter buttons above the results and choosing
+  a group's heading when it has more; Escape goes back. Groups reorder as
+  slower results arrive until you move the highlight; after that they stay
+  put and later groups join at the end. The panel and key hints hide in
+  narrow windows.
 - **Ask an agent**: start with `ask:` to write a question for your default
   agent, or choose **Ask** under a long query. Enter opens New chat with the
   question addressed to that agent; press Enter again to send it. If New chat
@@ -936,7 +946,10 @@ and are asked to sign in again in Buzz.
   is on. With a message selected, E edits it, R reacts, T or → replies in thread,
   U marks it unread, and Delete deletes your own message.
   With message text selected, Q quotes it into the draft.
-  ⌘1–9 switch communities, and ⇧Esc marks everything read. If a plugin uses
+  ⌘1–9 switch communities, and ⇧Esc marks everything read. ⌘R (Ctrl+R)
+  reloads Buzz in place: every community reconnects and reads its
+  conversations from the relay again, and running agents keep working. ⇧⌘R
+  (Ctrl+Shift+R) reloads the whole app, which restarts running agents. If a plugin uses
   the same key as another shortcut, Settings → Shortcuts marks it "Also used
   by"; change one of them to choose which fires. In the Mac app, **Buzz →
   Settings…** in the menu bar also opens Settings.
@@ -984,6 +997,7 @@ and are asked to sign in again in Buzz.
   delivery confirmation and keep their access. Public chats post directly.
   The success toast confirms any change to View only and offers **View** to open
   the posted link in the destination channel.
+  Chat links stay inline in the composer and messages, like other links.
   Opening a shared chat link creates no sidebar entry.
   Direct invitations still add members. Pasting a link to a Private chat you own into a channel, thread or DM
   uses the same confirmation, then sends your original message. Owned View only
@@ -1039,9 +1053,11 @@ and are asked to sign in again in Buzz.
   on the right. Compact avatars sit before the name on the left; Solo chats show
   the included agents.
 - **App navigation**: use the left dock to switch apps. Bestie is first,
-  followed by Messages and the other apps. Activity is the first row of the
-  Messages sidebar. Community and profile controls
-  sit at the bottom of the dock. Search stays wide in the top bar.
+  followed by Messages and the other apps. Activity and other enabled sidebar
+  pages stay at the top of the Messages sidebar while you scroll conversations.
+  Scroll the pinned area if the window is too short to show every page.
+  Community and profile controls sit at the bottom of the dock. Search stays
+  wide in the top bar.
   Messages shows your workspaces, Starred and unfiled conversations together.
   Other apps can provide their own sidebar. Pages listed in the Messages
   sidebar, such as the Drafts & sent plugin, keep Messages selected in the dock. The
@@ -1188,6 +1204,9 @@ available rather than silently discarding it.
 
 ## Choosing and customizing agents
 
+Agents can use `agent_update` to propose harness settings for your local agents in the same community, including the Auto-compact threshold on supported harnesses. **Proposed settings** compares the saved and proposed values. Review or edit the draft and select **Save** to apply it, or close the review to discard it. A Codex agent using an execution adapter can only propose the
+default Huddle voice.
+
 - An optional plugin can attach context to a native session. Follow-ups and
   reconnects keep that association. **New** starts another association. Each
   agent keeps its current conversation, reply placement and session controls.
@@ -1252,15 +1271,21 @@ available rather than silently discarding it.
   thread's context separate. **One session per channel** lets threads in the
   same channel share context. **One session per community** shares one session
   across that agent's channels, threads, DMs, Solo chats and huddles in the same
-  community. A new message can reach the agent while it's working. The agent
-  can reply in that conversation and continue the earlier work. Attention and
-  plugin wakes with a destination can also join the running turn. Wakes without
-  a destination and requests that need a new turn, such as a model change, wait
-  in order. New and Compact affect that shared session
-  from any conversation. Community scope does not grant additional channel
+  community. Within any session scope, a new message or an addressed Attention
+  or plugin wake can join a compatible running turn. The agent can reply to
+  each request in its own conversation. A model or effort change applies
+  right away where the harness can change a running turn, and otherwise
+  waits in order for a new turn, as it does in community scope. A turn
+  started in a Solo chat that is shared while it runs finishes under the
+  Solo chat's posting rules, and the shared chat's next request waits for
+  it. New and Compact affect the community
+  session from any conversation. Community scope does not grant additional channel
   access or share context with another community. Under the thread and channel
   choices, each DM, huddle room and Solo chat remains its own continuing
   conversation. Session lifetime and restoration still depend on the harness.
+  The session scope stays selected when you switch between Codex, Claude, Goose
+  and Pi. The harness-switch confirmation shows **Session scope · Dropped**
+  when the destination cannot keep the saved scope.
 - An agent's own messages do not wake it, even when they mention its name.
   To pass work to the same agent in another conversation, use `self_handoff`
   with the channel, text, and a thread message ID outside a Solo chat.
@@ -1276,6 +1301,10 @@ available rather than silently discarding it.
   Remote Claude uses the Claude sign-in on the target. It keeps each saved
   conversation in that target's workspace. Stop ends its active turn.
   Remote Claude usage totals and transcripts are unavailable.
+
+### Recover incompatible agent settings
+
+If an agent reports incompatible synced settings, choose the **Previous Versions** link to go to its Settings tab. Versions that use settings this client cannot apply are marked **Incompatible**. Malformed versions are marked **Not valid**. Open an older compatible Settings version and choose **Revert to this** to restore its settings as a new version. Reverting keeps the agent’s instructions. If you cannot find a compatible revision, use a Buzz version that supports the saved settings.
 
 ### Builderlab accounts and remote agents
 
@@ -1333,8 +1362,20 @@ available rather than silently discarding it.
   and level. An optional explanation supplied by the distributor appears above
   the model details. When the build names who recommends the setup,
   **Recommended by [name].** precedes the supplied description.
-  The agent keeps its harness afterwards. If no recommended model is offered
-  when the agent runs, it uses the harness's default. If nothing recommended is
+  While the agent stays on Automatic, each time Buzz starts on the computer
+  that runs it, it moves to the first recommended harness that is set up
+  there, if that is a different one. When Buzz can't tell yet whether a
+  harness is set up, as when its check is slow to answer, it waits for the
+  next start. So if the harness it uses is signed out or out of date on this
+  computer, it moves to the next recommended harness that is ready the next
+  time Buzz starts; a check that times out or fails never moves it. Its
+  instructions and workspace come along; its old sessions are retired, so new
+  conversations start fresh on the new harness. It waits while it is
+  answering, and stays
+  put when nothing recommended is set up there or when moving would reset a
+  setting of its own, such as a channel-wide session setting. If no
+  recommended model is offered when the agent runs, it uses the harness's
+  default. If nothing recommended is
   set up on this computer, a row asks you to set up Goose, Codex or Claude first, with a
   **Set up** button, and Create waits in Automatic. You can still choose Custom and a hosted harness. **Custom** opens
   Harness, Model and Thinking in place, starting from what Automatic picked. An
@@ -1857,6 +1898,15 @@ tab, asks **Discard changes?** first; **Keep editing** keeps them.
   folder. After that the agent can reload it from that folder. A reload that
   fails to start restores the previous version. Changed host access still needs
   the person's review through the plugin's **Update**.
+- **Performance diagnostics** starts off and is unlisted in the Plugins catalog.
+  Approve an agent's enable request to turn it on. Ask an agent to disable it
+  when you finish. Once enabled,
+  `performance_snapshot` gives an agent a bounded JSON report from this app.
+  It samples visible page delay, client batch and read work, agent updates and
+  plugin MCP reply encoding for 1–10 seconds (default 5). It reports aggregate
+  activity across retained communities and excludes message text and credentials.
+  It lists unsupported engine measurements. An external agent needs the owner's
+  existing full-agent approval.
 - In the desktop app, agents can list this device's plugins and disable one.
   Installing, updating, enabling or removing a plugin is a request: the agent's
   message in the conversation shows a card with **Review** and **Decline**, and the
@@ -1914,7 +1964,11 @@ tab, asks **Discard changes?** first; **Keep editing** keeps them.
   “Runs in” names its execution conversation; its instructions can specify a
   different place to report. Turning the plugin on does not grant new access.
   An event watch hears the channels its agent may read, including public channels
-  the agent has not joined. A watch's delivery channel must be one the agent is
+  the agent has not joined. If a channel's history read fails, other watched
+  channels can still catch up. Buzz retries the failed read while it stays open.
+  Repeated errors increase the wait between attempts, up to about five minutes.
+  The watch keeps trying until you pause or remove it.
+  A watch's delivery channel must be one the agent is
   a member of; the relay decides where the agent may post. When an agent creates or enables a watch, adds listening channels or changes its delivery channel, it needs confirmed access. Removing or reordering an explicit listening list remains available without rechecking unchanged channels. Edits to active event watches and timer rearms remain available while an unchanged channel is unreachable or waiting for confirmation. An agent's write to an enabled source starts a new run and requires confirmed destination membership. On macOS and Linux,
   watched commands stop when their Buzz process exits.
   During a handoff between Buzz builds, the new copy waits for the previous

@@ -146,11 +146,12 @@ writer selects the admission contract by the event's `d` coordinate. The
 sidebar coordinates must match what the sidebar signer produces, and recipe
 coordinates must satisfy the recipe contract.
 
-The sidebar defaults to **Plugins** (sidebar pages such as Activity, when
-any are enabled), **Starred**, personal workspaces, **Solo**, **Team**,
-**Forums**, and **Direct messages**. All sections can be reordered by dragging
-the heading or through **Move up** and **Move down**. The saved order syncs with
-workspace placement.
+Enabled sidebar pages such as Activity stay fixed above the scrolling conversation
+list. When the pinned rows run out of vertical space, scroll their area to see
+the rest. The conversation sections default to **Starred**, personal
+workspaces, **Solo**, **Team**, **Forums**, and **Direct messages**. Reorder them
+by dragging their headings or using **Move up** and **Move down**. The saved
+order syncs with workspace placement.
 
 Drag a chat, channel, forum or DM into any workspace, into Starred, or back to
 its home section. The row’s **Move to…** menu offers the same destinations.
@@ -638,7 +639,12 @@ New message from previewing the DM's history (see
 refreshes with the channel roster, preserves the last good set on failure and
 rejects older snapshots. Live cross-device visibility updates are deferred; any
 confirmed `41010` open, including New message Send, unhides the DM, and its row
-returns when visibility next refreshes.
+returns when visibility next refreshes. A new message from another member also
+unhides it on the relay, which republishes the snapshot before the message fans
+out, so its arrival in a hidden DM refreshes visibility and the row returns.
+Reconnect replay counts as an arrival, and one that lands before the first
+visibility read finishes waits for that read to classify it. A message only for
+agents (`audience: agents`) leaves the DM hidden.
 
 A definitive rejection offers retry without optimistic removal. If publication or
 confirmation has an uncertain outcome, the dialog warns that the command may have

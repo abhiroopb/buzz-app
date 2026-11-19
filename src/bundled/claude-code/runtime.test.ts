@@ -51,7 +51,7 @@ import {
   PROCESS_LIMIT,
   withRoom,
 } from "./sessions";
-import { BASE_PROMPT } from "../../features/agent-harness/base-prompt";
+import { composeBase } from "../../features/agent-harness/sections/compose";
 import {
   assignConversationFolder,
   conversationKey,
@@ -1154,7 +1154,7 @@ it("gives each turn of a kept session the plugins' instructions as they are now"
   expect(second).toContain("Run dibs_watch first.");
   expect(second).not.toContain("Run dibs_check first.");
   expect(third).not.toContain("<plugin-instructions");
-  expect(BASE_PROMPT).toContain(
+  expect(composeBase({ scope: "thread" }).text).toContain(
     "a turn without any means no plugin instructions apply now",
   );
 });
@@ -1381,6 +1381,84 @@ it("refuses a synced effort its model lacks, but lets a busy turn take a steer",
   await run(reply, { effort: "medium" });
   await flush(10);
   expect(prompts()).toBe(2);
+  runtime.dispose();
+});
+it("keeps steering a busy turn's effort through a follow-up without a pick", async () => {
+  const root = message("2", "@Claude hi", {
+    tags: [
+      ["h", channel],
+      ["p", self],
+    ],
+  });
+  const reply = (id: string) =>
+    message(id, "@Claude also", {
+      tags: [
+        ["h", channel],
+        ["e", root.id, "", "reply"],
+        ["p", self],
+      ],
+    });
+  const { runtime, claudes, agent } = setup([root, reply("3"), reply("4")], {
+    hold: true,
+  });
+  const run = (event: typeof root, effort?: string) =>
+    runtime.run({
+      trigger: { type: "mention", event },
+      channelId: channel,
+      agent,
+      config: DEFAULT_CONFIG,
+      ...(effort ? { effort } : {}),
+      signal: new AbortController().signal,
+      workingUntil: () => {},
+    } as unknown as Delivery);
+  const prompts = () =>
+    claudes().reduce((sum, process) => sum + process.prompts.length, 0);
+  await run(root, "high");
+  await flush(10);
+  expect(prompts()).toBe(1);
+  await run(reply("3"));
+  await flush(10);
+  expect(prompts()).toBe(2);
+  await run(reply("4"), "high");
+  await flush(10);
+  expect(prompts()).toBe(3);
+  expect(claudes()).toHaveLength(1);
+  runtime.dispose();
+});
+it("steers a follow-up's own effort into a busy turn", async () => {
+  const root = message("2", "@Claude hi", {
+    tags: [
+      ["h", channel],
+      ["p", self],
+    ],
+  });
+  const reply = message("3", "@Claude lower", {
+    tags: [
+      ["h", channel],
+      ["e", root.id, "", "reply"],
+      ["p", self],
+    ],
+  });
+  const { runtime, claudes, agent } = setup([root, reply], { hold: true });
+  const run = (event: typeof root, effort: string) =>
+    runtime.run({
+      trigger: { type: "mention", event },
+      channelId: channel,
+      agent,
+      config: DEFAULT_CONFIG,
+      effort,
+      signal: new AbortController().signal,
+      workingUntil: () => {},
+    } as unknown as Delivery);
+  const prompts = () =>
+    claudes().reduce((sum, process) => sum + process.prompts.length, 0);
+  await run(root, "high");
+  await flush(10);
+  expect(prompts()).toBe(1);
+  await run(reply, "low");
+  await flush(10);
+  expect(prompts()).toBe(2);
+  expect(claudes()).toHaveLength(1);
   runtime.dispose();
 });
 it("checks a synced effort when a saved session resumes or a folder change relaunches it", async () => {
@@ -1918,6 +1996,50 @@ it("resumes an idle session at a newly saved effort", async () => {
   expect(second?.options.args).toEqual(
     expect.arrayContaining(["--resume", "--effort", "low"]),
   );
+  runtime.dispose();
+});
+
+it("resumes an idle session at a newly saved compaction threshold", async () => {
+  const root = message("2", "@Claude hi", {
+    tags: [
+      ["h", channel],
+      ["p", self],
+    ],
+  });
+  const reply = message("3", "@Claude again", {
+    tags: [
+      ["h", channel],
+      ["e", root.id, "", "reply"],
+      ["p", self],
+    ],
+  });
+  const { runtime, claudes, agent } = setup([root, reply]);
+  const run = (event: typeof root, compactAt?: string) => {
+    const config = { ...DEFAULT_CONFIG, ...(compactAt && { compactAt }) };
+    runtime.sync([{ key: self, pubkey: self, config } as Agent]);
+    return runtime.run({
+      trigger: { type: "mention", event },
+      channelId: channel,
+      agent,
+      config,
+      signal: new AbortController().signal,
+      workingUntil: () => undefined,
+    } as unknown as Delivery);
+  };
+  await run(root);
+  await flush(10);
+  const first = claudes().find((process) => process.prompts.length);
+  expect(first?.options.env).not.toHaveProperty(
+    "CLAUDE_CODE_AUTO_COMPACT_WINDOW",
+  );
+  await run(reply, "400000");
+  await flush(10);
+  const second = claudes().filter((process) => process.prompts.length)[1];
+  expect(first?.killed).toBe(true);
+  expect(second?.options.args).toContain("--resume");
+  expect(second?.options.env).toMatchObject({
+    CLAUDE_CODE_AUTO_COMPACT_WINDOW: "400000",
+  });
   runtime.dispose();
 });
 
