@@ -2028,7 +2028,7 @@ it.each([false, true])(
     vi.useFakeTimers();
     const h = messagesHarness();
     const physicalRoot = task ? "d".repeat(64) : row.id;
-    h.props.subthreadId = task ? row.id : undefined;
+    (h.props as ThreadPanelProps).subthreadId = task ? row.id : undefined;
     const reply = {
       ...row,
       id: "c".repeat(64),
