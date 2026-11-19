@@ -8954,7 +8954,11 @@ it.each(["thread", "channel", "community"])(
     ]);
     const taskThread = threadId(0);
     const agent = { ...first.agent, config: first.config } as unknown as Agent;
-    const place = { channelId: "channel", root: anchor, isolated: true };
+    const place = {
+      channelId: "channel",
+      root: anchor,
+      isolated: true,
+    } as const;
     await vi.waitFor(() =>
       expect(f.runtime.sessionState(agent, place)).toBe("idle"),
     );
