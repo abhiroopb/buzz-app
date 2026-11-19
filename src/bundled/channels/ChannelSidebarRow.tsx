@@ -129,7 +129,13 @@ export function ChannelSidebarRow({
           };
           // Keep focus visible where the user is reading, including when the
           // original section is entirely outside the viewport.
-          const visible = candidates.find(inView) ?? liveRows.find(inView);
+          const visible =
+            candidates.find(inView) ??
+            [
+              ...sidebar.querySelectorAll<HTMLButtonElement>(
+                "button[data-channel-id], button[data-solo-destination-id]",
+              ),
+            ].find(inView);
           visible?.focus({ preventScroll: true });
           if (visible && document.activeElement === visible) return;
         }

@@ -1,7 +1,12 @@
 import { test, expect } from "./fixture.mjs";
 import { openPage } from "./navigation.mjs";
 
-test.use({ productionBroker: true, savedSidebar: true, sidebarIcons: true });
+test.use({
+  pluginFixtures: true,
+  productionBroker: true,
+  savedSidebar: true,
+  sidebarIcons: true,
+});
 
 // The fixture groups use custom-emoji icons; serve every one as a plain image.
 test.beforeEach(({ page }) =>
@@ -88,7 +93,10 @@ test("closing a heading's dialog with the mouse leaves its menu button visible",
 }) => {
   await page.goto(app.origin);
   await openPage(page, "Messages");
-  const more = page.getByRole("button", { name: "More actions for Work" });
+  const more = page.getByRole("button", {
+    name: "More actions for Work",
+    exact: true,
+  });
   await more.click();
   await page.getByRole("menuitem", { name: "Workspace settings" }).click();
   const dialog = page.getByRole("dialog", { name: "Workspace settings" });
@@ -119,7 +127,7 @@ test.describe("passive channel removal", () => {
   for (const { title, keepViewport } of [
     {
       title:
-        "keeps the visible Solo row when a focused channel is archived above it",
+        "keeps a contributed Solo row in view when a focused channel is archived above it",
       keepViewport: true,
     },
     {
@@ -129,7 +137,9 @@ test.describe("passive channel removal", () => {
   ])
     test(title, async ({ page, app }) => {
       await page.setViewportSize({ width: 1100, height: 430 });
-      await page.goto(app.origin);
+      await page.goto(
+        keepViewport ? `${app.origin}/?solo-region-fixture` : app.origin,
+      );
       await openPage(page, "Messages");
       const sidebar = page.getByRole("navigation", {
         name: "Subscribed channels",
@@ -137,9 +147,22 @@ test.describe("passive channel removal", () => {
       const workspace = sidebar.locator('[data-sidebar-section="group:work"]');
       const heading = workspace.locator("summary");
       const beta = workspace.getByRole("button", { name: "Beta", exact: true });
-      const anchor = sidebar.locator(
-        `button[data-solo-destination-id="${soloIds[8]}"]`,
-      );
+      const soloRow = (id) =>
+        sidebar.locator(`button[data-solo-destination-id="${id}"]`);
+      await expect(soloRow(soloIds.at(-1))).toBeVisible();
+      if (keepViewport) {
+        await page.evaluate(async (ids) => {
+          for (const id of ids) await window.fixtureSoloRegion.classify(id);
+        }, soloIds);
+        await expect(
+          sidebar.locator("button[data-channel-id][data-solo-destination-id]"),
+        ).toHaveCount(0);
+      }
+      const anchor = keepViewport
+        ? sidebar
+            .locator(`[data-solo-destination-root="${soloIds[8]}"]`)
+            .locator(`button[data-solo-destination-id="${soloIds[8]}"]`)
+        : soloRow(soloIds[8]);
       await expect(anchor).toBeVisible();
       await expect.poll(() => app.relay.hasRoute("primary", "beta")).toBe(true);
       await beta.focus();
@@ -147,8 +170,9 @@ test.describe("passive channel removal", () => {
       // native scroll anchoring disabled. Layout anchoring has its own tests.
       const inset = keepViewport
         ? await beta.evaluate((row) => {
-            row.closest("nav").style.overflowAnchor = "none";
-            return row.getBoundingClientRect().height + 10;
+            const viewport = row.closest("nav");
+            viewport.style.overflowAnchor = "none";
+            return viewport.clientHeight / 3;
           })
         : 10;
       await (keepViewport ? anchor : beta).evaluate((row, offset) => {
@@ -176,10 +200,10 @@ test.describe("passive channel removal", () => {
         workspace.locator('button[data-channel-id="beta"]'),
       ).toHaveCount(0);
       if (keepViewport) {
-        await expect(anchor).toBeInViewport({ ratio: 1 });
         await expect(
-          sidebar.locator("button[data-channel-id]:focus"),
+          sidebar.locator("button[data-solo-destination-id]:focus"),
         ).toBeInViewport({ ratio: 1 });
+        await expect(anchor).toBeInViewport({ ratio: 1 });
       } else {
         await expect(heading).toBeFocused();
         await expect(heading).toBeInViewport({ ratio: 1 });
