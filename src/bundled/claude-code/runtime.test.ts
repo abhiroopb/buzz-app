@@ -2349,8 +2349,14 @@ it("stops a routed community wake before Claude receives its prompt", async () =
   const f = setup();
   const root = "1".repeat(64);
   const parent = "2".repeat(64);
-  const entered = Promise.withResolvers<void>();
-  const gate = Promise.withResolvers<void>();
+  let reachAdmission!: () => void;
+  let release!: () => void;
+  const entered = new Promise<void>((resolve) => {
+    reachAdmission = resolve;
+  });
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
   const config = { ...DEFAULT_CONFIG, scope: "community" as const };
   const routeConversation = async () => ({ root, parent });
   const prompts = () => f.claudes().flatMap((process) => process.prompts);
@@ -2364,17 +2370,17 @@ it("stops a routed community wake before Claude receives its prompt", async () =
     config,
     routeConversation,
     prepareSession: async () => {
-      entered.resolve();
-      await gate.promise;
+      reachAdmission();
+      await gate;
       return undefined;
     },
   });
   try {
-    await entered.promise;
+    await entered;
     const stop = f.interruptible.mock.calls[0]?.[0];
     if (!stop) throw new Error("Expected a request stop control");
     const stopping = expect(stop()).resolves.toBeUndefined();
-    gate.resolve();
+    release();
     await Promise.all([running, stopping]);
     const outcomes = await Promise.all(
       f.workingUntil.mock.calls.map(([done]) => done),
@@ -2382,7 +2388,7 @@ it("stops a routed community wake before Claude receives its prompt", async () =
     expect(prompts()).toEqual(firstPrompts);
     expect(outcomes).toContainEqual({ ok: false, stopped: true });
   } finally {
-    gate.resolve();
+    release();
     await Promise.allSettled([running]);
     f.runtime.dispose();
   }
