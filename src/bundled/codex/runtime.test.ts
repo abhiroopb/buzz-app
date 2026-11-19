@@ -8929,8 +8929,11 @@ it.each(["thread", "channel", "community"])(
     const threadId = (index: number) =>
       (f.starts()[index]?.params as { threadId?: string } | undefined)
         ?.threadId;
-    await f.runtime.run(routed("Start the task"));
+    const first = routed("Start the task");
+    await f.runtime.run(first);
     await vi.waitFor(() => expect(f.starts()).toHaveLength(1));
+    const initial = f.sent.find(({ method }) => method === "thread/start")
+      ?.params as { developerInstructions: string } | undefined;
     await f.complete(0, "First task reply");
     await f.runtime.run(routed("Continue the task"));
     await vi.waitFor(() => expect(f.starts()).toHaveLength(2));
@@ -8949,6 +8952,47 @@ it.each(["thread", "channel", "community"])(
         ["e", anchor, "", "reply"],
       ],
     ]);
+    const taskThread = threadId(0);
+    const agent = { ...first.agent, config: first.config } as unknown as Agent;
+    const place = { channelId: "channel", root: anchor, isolated: true };
+    await vi.waitFor(() =>
+      expect(f.runtime.sessionState(agent, place)).toBe("idle"),
+    );
+    const beforeCompact = f.sent.length;
+    const compacted = f.runtime
+      .session(agent, place, "compact")
+      .catch((error: unknown) => error);
+    try {
+      await vi.waitFor(() =>
+        expect(f.sent.slice(beforeCompact)).toContainEqual(
+          expect.objectContaining({
+            method: "thread/compact/start",
+            params: { threadId: taskThread },
+          }),
+        ),
+      );
+      const compact = f.sent
+        .slice(beforeCompact)
+        .find(({ method }) => method === "thread/resume");
+      expect(initial?.developerInstructions).toEqual(expect.any(String));
+      expect(compact?.params).toMatchObject({
+        threadId: taskThread,
+        developerInstructions: initial?.developerInstructions,
+      });
+    } finally {
+      f.emit({
+        method: "turn/started",
+        params: { threadId: taskThread, turn: { id: "compact" } },
+      });
+      f.emit({
+        method: "turn/completed",
+        params: {
+          threadId: taskThread,
+          turn: { id: "compact", status: "completed" },
+        },
+      });
+      await expect(compacted).resolves.toBeUndefined();
+    }
     await f.runtime.run(configured("Continue in the source"));
     await vi.waitFor(() => expect(f.starts()).toHaveLength(3));
     expect(threadId(2)).toBeTruthy();

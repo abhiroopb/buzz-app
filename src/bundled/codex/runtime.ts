@@ -850,10 +850,13 @@ export class CodexRuntime {
       if (!thread) throw new Error("There is no session here to compact yet.");
       const server = this.open(this.handle(agent.key));
       const rpc = await server.opening;
-      const settings = this.resolveConfig(agent.config);
+      const configured = this.resolveConfig(agent.config);
+      const settings = place.isolated
+        ? { ...configured, scope: "thread" as const }
+        : configured;
       const conversation = {
         channelId: place.channelId,
-        ...((settings.scope === "channel" && !place.isolated) || !place.root
+        ...(settings.scope === "channel" || !place.root
           ? {}
           : { root: place.root }),
       };
