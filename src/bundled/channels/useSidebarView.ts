@@ -243,6 +243,17 @@ export function useSidebarView(
     if (pending?.explicit ? pending.location === location : !preserve)
       attempt.current();
   }, [preserve, location]);
+  const adjustScrollAnchor = useCallback((top: number) => {
+    const viewport = list.current;
+    if (
+      !viewport ||
+      pending.current ||
+      reveal.current ||
+      viewport.scrollTop === moved.current
+    )
+      return;
+    moved.current = scroll(viewport, top) ?? moved.current;
+  }, []);
   useLayoutEffect(() => {
     attempt.current = () => {
       if (!ready || !reveal.current || !list.current) return;
@@ -331,6 +342,7 @@ export function useSidebarView(
       toggle,
       retryReveal,
       revealAgain,
+      adjustScrollAnchor,
     }),
     [
       savedLocation,
@@ -340,6 +352,7 @@ export function useSidebarView(
       toggle,
       retryReveal,
       revealAgain,
+      adjustScrollAnchor,
     ],
   );
 }

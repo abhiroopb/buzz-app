@@ -551,7 +551,7 @@ function useDestinationFocus(
         ];
         for (const candidate of candidates) {
           if (!candidate || candidate.closest("[hidden], [inert]")) continue;
-          candidate.focus();
+          candidate.focus({ preventScroll: true });
           if (document.activeElement === candidate) break;
         }
       });
