@@ -2959,11 +2959,15 @@ page's JSON route params, synchronously or asynchronously. Return `undefined` to
 decline. Buzz sets the page identity and keeps the link's scope. It bounds and
 validates the params with `route.validate` before presenting the page.
 
-Buzz considers active pages in contribution-key order with a shared one-second
-budget. Honor the signal when the visit or session changes, the page is removed,
-or the budget ends. If root evidence is slow or no page supplies a valid route,
-Buzz reveals the message in Channels. The visit keeps the original link address, so reopening or going
-Forward checks access again. The page still owns access to its own domain data.
+Buzz considers active pages in contribution-key order for up to one second,
+leaving time for Channels to reveal the message before the visit expires.
+Honor the signal when the visit, reader selection or session changes, the page
+is removed, or the budget ends. If root evidence is slow or no page supplies a
+valid route, Buzz reveals the message in Channels. The visit keeps the original
+link address. Returning to it from Settings or through Back or Forward checks
+access and resolves the message again. The workspace keeps its local state if
+the same covered page and route return. The page still owns access to its own
+domain data.
 
 Browser `#buzz=` addresses and session history support reload and Back/Forward.
 Messages recognize the Buzz link forms `buzz://channel/<id>`,

@@ -221,6 +221,8 @@ export type ChannelTimelineProps = {
   /** Local presentation at the known history start, outside message semantics. */
   intro?: ReactNode;
   launchPending?: boolean | undefined;
+  /** An inactive timeline can show its rows but cannot replace its workspace. */
+  offerMessageLinks?: boolean | undefined;
   /** Solo chats page history on scroll; retain an explicit button for errors. */
   historyControl?: "button" | "scroll";
   /** Personal chats keep their compact initial history spacing. */
@@ -288,6 +290,7 @@ function Timeline({
   transient = false,
   latestRequest,
   marksRead = true,
+  offerMessageLinks = true,
   navigation,
   onOpenThread,
   onOpenMediaReview,
@@ -1214,7 +1217,14 @@ function Timeline({
       ? linkMessage
       : undefined;
   }, [queries, channelId, linkMessage]);
-  const offeringLink = useMessageLinkOffer(navigation, verifiedRoot);
+  const offeringLink = useMessageLinkOffer(
+    offerMessageLinks ? navigation : undefined,
+    verifiedRoot,
+  );
+  const inactiveRoot = offerMessageLinks ? undefined : verifiedRoot();
+  useLayoutEffect(() => {
+    if (inactiveRoot) navigation?.complete({ status: "opened" });
+  }, [navigation, inactiveRoot]);
   useMessageReveal({
     scroller,
     focus: focusesTarget && inlineTarget?.focus !== false,
