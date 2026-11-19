@@ -229,3 +229,37 @@ it("does not keep route receipts for ordinary mentions", async () => {
   expect(await registered.admissions.route(input)).toBeUndefined();
   expect([...registered.storage.keys()]).toEqual([]);
 });
+
+it("shares a logical community lifetime across sources and restores it without crossing memberships", async () => {
+  const f = await setup();
+  const community = { channelId: "first", community: true as const };
+  const first = await f.admissions.prepare({
+    ...request("first"),
+    conversation: community,
+  });
+  first?.acknowledged();
+  const restored = await setup({}, f.storage);
+  const second = await restored.admissions.prepare({
+    ...request("second"),
+    source: { channelId: "other" },
+    conversation: { ...community, channelId: "other" },
+  });
+  expect(second?.session).toEqual(first?.session);
+  const other = await restored.admissions.prepare({
+    ...request("other-community"),
+    agent: `${agent}@other.example`,
+    conversation: community,
+  });
+  expect(other?.session.sessionKey).not.toBe(first?.session.sessionKey);
+  await restored.admissions.reset(
+    agent,
+    "example/native",
+    community,
+    async () => {},
+  );
+  const reset = await restored.admissions.prepare({
+    ...request("after-reset"),
+    conversation: community,
+  });
+  expect(reset?.session.sessionKey).not.toBe(first?.session.sessionKey);
+});

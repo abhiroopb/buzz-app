@@ -73,6 +73,10 @@ export type SearchDestination = {
   /** What choosing the row does, said in a preview that has nothing else to
    * show, e.g. "Open Activity". */
   action?: string | undefined;
+  /** Stays with the row above it: a group cut short in Top results keeps
+   * the two together, one row past its usual limit if need be. A cut that
+   * hides the row above still shows this one, after the rows shown. */
+  attached?: boolean | undefined;
   run: () => void;
 };
 
@@ -179,7 +183,8 @@ export type SearchInputProps = {
   onQueryChange: (query: string) => void;
   input: RefObject<HTMLElement | null>;
   label?: string;
-  scope?: { label: string; onRemove: () => void } | undefined;
+  /** One conversation the search is narrowed to, by `id`. */
+  scope?: { id: string; label: string; onRemove: () => void } | undefined;
   /** A control that refines the results, inside the field after Clear. */
   fieldAction?: ReactNode;
   chips?: readonly SearchChip[] | undefined;
@@ -242,6 +247,7 @@ export function SearchChoices({
   peek,
   completing = false,
   completionPending = false,
+  conversationShortcut,
 }: SearchInputProps & {
   groups: readonly SearchGroup[];
   children?: ReactNode;
@@ -268,6 +274,9 @@ export function SearchChoices({
   /** The suggestions that would complete the filter are still loading, so
    * Tab stays in the field rather than leaving before they arrive. */
   completionPending?: boolean;
+  /** Hinted with the keys below: the chord that searches the current
+   * conversation instead. */
+  conversationShortcut?: KeyBinding | undefined;
 }) {
   const palette = useRef<HTMLDivElement>(null);
   // A hidden preview would still read; it mounts only where it shows.
@@ -354,7 +363,10 @@ export function SearchChoices({
   // while its source hasn't searched the text as typed, shown by its own
   // status until it has rows. It's let go once its source has searched and
   // settled without it. Shown or not, the choice is never kept out of sight.
-  const chosen = ranked.find((group) => group.label === peekScope);
+  // With nothing typed, the first group is the view search opens on, so
+  // there is no Top results above it.
+  const home = needle ? undefined : ranked[0]?.label;
+  const chosen = ranked.find((group) => group.label === (peekScope ?? home));
   const awaited =
     !!peekScope &&
     (!!peek?.busy || Object.hasOwn(peek?.unsearched ?? {}, peekScope));
@@ -387,7 +399,8 @@ export function SearchChoices({
             const place = ranked.indexOf(group);
             if (place < 0) return group;
             const rows = resultRows(group);
-            const limit = place === 0 ? LEAD_ROWS : GROUP_ROWS;
+            const cap = place === 0 ? LEAD_ROWS : GROUP_ROWS;
+            const limit = rows[cap]?.attached ? cap + 1 : cap;
             if (rows.length <= limit && !group.count)
               return { ...group, destinations: rows };
             truncated.set(group.label, rows.length);
@@ -396,7 +409,10 @@ export function SearchChoices({
             const count = countOf(group);
             return {
               ...group,
-              destinations: rows.slice(0, limit),
+              destinations: [
+                ...rows.slice(0, limit),
+                ...rows.slice(limit).filter((row) => row.attached),
+              ],
               total: /^\d+$/.test(count) ? Number(count) : -1,
             };
           });
@@ -428,6 +444,7 @@ export function SearchChoices({
     isAction,
     highlightEmpty,
     followFirst: !!peek?.ranked,
+    within: scope?.id,
     // A kept place keeps its row: Enter never chooses a row scrolled away.
     ...(place?.key && keys.includes(place.key)
       ? { initial: place.key }
@@ -917,7 +934,10 @@ export function SearchChoices({
               !event.metaKey &&
               !event.altKey
             ) {
-              const order = [undefined, ...tabs.map(({ label }) => label)];
+              const order = [
+                ...(home ? [] : [undefined]),
+                ...tabs.map(({ label }) => label),
+              ];
               const next =
                 order.indexOf(scoped?.label) + (event.shiftKey ? -1 : 1);
               if (tabs.length ? next >= 0 && next < order.length : peek.busy) {
@@ -926,8 +946,9 @@ export function SearchChoices({
               }
               return;
             }
-            // Escape from one group returns to Top results, not out of search.
-            if (event.key === "Escape" && scoped) {
+            // Escape from one group returns to Top results, or the first
+            // group, not out of search.
+            if (event.key === "Escape" && scoped && scoped.label !== home) {
               event.preventDefault();
               event.stopPropagation();
               showScope(undefined);
@@ -946,13 +967,14 @@ export function SearchChoices({
             className="search-peek-rail"
             aria-label="Result groups"
             onKeyDown={(event) => {
-              if (event.key !== "Escape" || !scoped) return;
+              if (event.key !== "Escape" || !scoped || scoped.label === home)
+                return;
               event.preventDefault();
               event.stopPropagation();
               showScope(undefined);
             }}
           >
-            {[undefined, ...tabs].map((group, index) => (
+            {(home ? tabs : [undefined, ...tabs]).map((group, index) => (
               <Button
                 key={group?.label ?? ""}
                 id={`${peekPanelId(group?.label)}-filter`}
@@ -975,10 +997,7 @@ export function SearchChoices({
                 />
                 {group?.label === "Direct messages"
                   ? "DMs"
-                  : group?.label === "Recent searches"
-                    ? "Recents"
-                    : (group?.label ??
-                      (query.trim() ? "Top results" : "Jump back in"))}
+                  : (group?.label ?? "Top results")}
                 {/* A landing group has no count yet. */}
                 {(!group || group !== landing) && (
                   <span className="search-peek-count">
@@ -1235,8 +1254,17 @@ export function SearchChoices({
           <span>
             <kbd>↵</kbd> Open
           </span>
+          {conversationShortcut && (
+            <span>
+              <kbd>{formatBinding(conversationShortcut, apple).text}</kbd> This
+              conversation
+            </span>
+          )}
           <span>
-            <kbd>esc</kbd> {scoped ? "Back to top" : "Close"}
+            <kbd>esc</kbd>{" "}
+            {scoped && scoped.label !== home
+              ? `Back to ${home ?? "top"}`
+              : "Close"}
           </span>
         </div>
       )}
