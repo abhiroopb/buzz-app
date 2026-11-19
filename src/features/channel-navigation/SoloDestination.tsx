@@ -520,7 +520,7 @@ function useDestinationFocus(
         "[data-solo-destination-root]",
       );
       if (!node || (owner ? owner !== node : !focused.current)) return;
-      queueMicrotask(() => {
+      const restoreFocus = () => {
         if (document.activeElement !== document.body) return;
         // The ref can capture the final order after this effect cleans up.
         const rows = neighbors.current;
@@ -574,7 +574,10 @@ function useDestinationFocus(
           candidate.focus();
           if (document.activeElement === candidate) break;
         }
-      });
+      };
+      // Cleanup can queue focus recovery before the rest of the commit mutates
+      // the sidebar. Let its mutation observer correct the viewport first.
+      queueMicrotask(() => queueMicrotask(restoreFocus));
     };
   }, [root, channelId, visible]);
   return {

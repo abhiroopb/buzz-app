@@ -213,6 +213,7 @@ export function useSidebarView(
     if (list.current.scrollTop === 0)
       moved.current =
         scroll(list.current, intent.current.scrollTop) ?? moved.current;
+    captureScrollAnchor.current?.();
     pending.current = false;
   }, [ready]);
   // A destination without an entry (the Messages landing page before it
@@ -246,13 +247,7 @@ export function useSidebarView(
   }, [preserve, location]);
   const adjustScrollAnchor = useCallback((top: number) => {
     const viewport = list.current;
-    if (
-      !viewport ||
-      pending.current ||
-      reveal.current ||
-      viewport.scrollTop === moved.current
-    )
-      return;
+    if (!viewport || pending.current || reveal.current) return;
     moved.current = scroll(viewport, top) ?? moved.current;
   }, []);
   useLayoutEffect(() => {
