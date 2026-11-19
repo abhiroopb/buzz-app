@@ -157,7 +157,7 @@ export function createSessionAdmissions(root: Context, storage: AgentStore) {
         );
       routers.register(ctx, router);
     },
-    async route(input: AdmissionRequest) {
+    async route(input: AdmissionRequest, nativePlacement?: true) {
       check(input.signal);
       const key =
         SESSION_ADMISSION_PREFIX +
@@ -182,25 +182,16 @@ export function createSessionAdmissions(root: Context, storage: AgentStore) {
           : null);
       const savedRoute =
         prior === null ? undefined : checkedRoute(parse<unknown>(prior));
-      const nativePlacement = async () => {
-        // A completed routing decision is evidence that an interrupted
-        // mention can resume natively. A pending or failed lookup has no receipt.
-        if (!input.event) return;
-        check(input.signal);
-        const accepted = parse<InvocationSubthread | null>(
-          await storage.add(key, "null"),
-        );
-        return accepted === null ? undefined : checkedRoute(accepted);
-      };
+      if (nativePlacement && !savedRoute) return;
       const candidates = routers.snapshot().filter((router) => router.route);
-      if (!candidates.length) return savedRoute ?? nativePlacement();
+      if (!candidates.length) return savedRoute;
       await Promise.all(candidates.map((router) => router.ready()));
       check(input.signal);
       const matches = candidates.filter((router) => router.matches(input));
       if (matches.length > 1)
         throw new Error("More than one plugin routes this conversation");
       const router = matches[0];
-      if (!router) return savedRoute ?? nativePlacement();
+      if (!router) return savedRoute;
       // A request already admitted under the old placement stays there.
       const legacy = await storage.read(
         SESSION_ADMISSION_PREFIX +
@@ -231,9 +222,10 @@ export function createSessionAdmissions(root: Context, storage: AgentStore) {
         (savedRoute.root !== route?.root || savedRoute.parent !== route.parent)
       )
         throw new Error("The invocation subthread cannot change");
+      if (!route) return;
       const accepted =
         parse<InvocationSubthread | null>(
-          await storage.add(key, JSON.stringify(route ?? null)),
+          await storage.add(key, JSON.stringify(route)),
         ) ?? undefined;
       if (accepted)
         await storage.add(

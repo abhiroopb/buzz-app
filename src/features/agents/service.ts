@@ -2424,18 +2424,28 @@ export class AgentsService extends Service implements Agents {
     /** The catch-up progress this program last read or saved. */
     let savedProgress: Checkpoints = {};
     this.runners = new AgentRunners({
-      routeConversation: (agent, type, trigger, placement, signal) =>
-        this.sessionAdmissions.route({
-          agent: agent.key,
-          owner: agent.owner,
-          harness: type.key,
-          ...placement,
-          invocationId:
-            trigger.type === "mention" ? trigger.event.id : trigger.id,
-          ...(trigger.type === "mention" ? { event: trigger.event } : {}),
-          resumed: trigger.type === "mention" && !!trigger.resumed,
-          signal,
-        }),
+      routeConversation: (
+        agent,
+        type,
+        trigger,
+        placement,
+        signal,
+        nativePlacement,
+      ) =>
+        this.sessionAdmissions.route(
+          {
+            agent: agent.key,
+            owner: agent.owner,
+            harness: type.key,
+            ...placement,
+            invocationId:
+              trigger.type === "mention" ? trigger.event.id : trigger.id,
+            ...(trigger.type === "mention" ? { event: trigger.event } : {}),
+            resumed: trigger.type === "mention" && !!trigger.resumed,
+            signal,
+          },
+          nativePlacement,
+        ),
       prepareSession: async (agent, type, trigger, placement, signal) => {
         if (
           !type.sessionAdmission ||
@@ -2519,11 +2529,7 @@ export class AgentsService extends Service implements Agents {
       },
       interrupted: {
         read: () => readInterrupted(this.storage),
-        write: (key, turns) => {
-          void writeInterrupted(this.storage, key, turns).catch((error) =>
-            console.warn("Agent turns in progress were not saved", error),
-          );
-        },
+        write: (key, turns) => writeInterrupted(this.storage, key, turns),
         changed: () => this.update(),
       },
       scope: (agent) => this.bindingOf(agent)?.scope,

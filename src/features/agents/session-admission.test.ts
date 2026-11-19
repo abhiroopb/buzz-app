@@ -179,7 +179,10 @@ it("pins an invocation route across retry and supplies it to rooted wakes", asyn
   expect(await f.admissions.route(request("invoked"))).toEqual(route);
   const restored = await setup({ route: resolve }, f.storage);
   expect(
-    await restored.admissions.route({ ...request("invoked"), resumed: true }),
+    await restored.admissions.route(
+      { ...request("invoked"), resumed: true },
+      true,
+    ),
   ).toEqual(route);
   expect(resolve.mock.calls.at(-1)?.[0].savedRoute).toEqual(route);
   expect(
@@ -215,22 +218,14 @@ it("does not save failed routing or move an invocation admitted before routing",
   expect(route).toHaveBeenCalledTimes(2);
 });
 
-it("keeps an interrupted native turn in place after a router is enabled", async () => {
-  const native = await setup();
+it("does not keep route receipts for ordinary mentions", async () => {
   const event = message(keypair(), source.channelId, "Work", 100);
-  const interrupted = { ...request(event.id), event };
-  expect(await native.admissions.route(interrupted)).toBeUndefined();
+  const input = { ...request(event.id), event };
+  const native = await setup();
+  expect(await native.admissions.route(input)).toBeUndefined();
+  expect([...native.storage.keys()]).toEqual([]);
 
-  const placement = { root: source.root, parent: "d".repeat(64) };
-  const route = vi.fn(async () => placement);
-  const restored = await setup({ route }, native.storage);
-  expect(
-    await restored.admissions.route({
-      ...interrupted,
-      resumed: true,
-    }),
-  ).toBeUndefined();
-  expect(await restored.admissions.route(interrupted)).toBeUndefined();
-  expect(route).not.toHaveBeenCalled();
-  expect(await restored.admissions.route(request("fresh"))).toEqual(placement);
+  const registered = await setup({ route: async () => undefined });
+  expect(await registered.admissions.route(input)).toBeUndefined();
+  expect([...registered.storage.keys()]).toEqual([]);
 });
