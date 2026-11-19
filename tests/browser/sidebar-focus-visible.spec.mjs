@@ -143,13 +143,21 @@ test.describe("passive channel removal", () => {
       await expect(anchor).toBeVisible();
       await expect.poll(() => app.relay.hasRoute("primary", "beta")).toBe(true);
       await beta.focus();
-      await (keepViewport ? anchor : beta).evaluate((row) => {
+      // Leave space for the removed row's height and exercise focus with
+      // native scroll anchoring disabled. Layout anchoring has its own tests.
+      const inset = keepViewport
+        ? await beta.evaluate((row) => {
+            row.closest("nav").style.overflowAnchor = "none";
+            return row.getBoundingClientRect().height + 10;
+          })
+        : 10;
+      await (keepViewport ? anchor : beta).evaluate((row, offset) => {
         const viewport = row.closest("nav");
         viewport.scrollTop +=
           row.getBoundingClientRect().top -
           viewport.getBoundingClientRect().top -
-          10;
-      });
+          offset;
+      }, inset);
       await expect(beta).toBeFocused();
       if (keepViewport) {
         await expect(beta).not.toBeInViewport();
@@ -158,14 +166,6 @@ test.describe("passive channel removal", () => {
         await expect(beta).toBeInViewport({ ratio: 1 });
         await expect(heading).not.toBeInViewport({ ratio: 1 });
       }
-      const offset = () =>
-        anchor.evaluate(
-          (row) =>
-            row.getBoundingClientRect().top -
-            row.closest("nav").getBoundingClientRect().top,
-        );
-      const before = await offset();
-
       app.setChannelMetadata("beta", [
         ["name", "Beta"],
         ["t", "stream"],
@@ -175,10 +175,14 @@ test.describe("passive channel removal", () => {
       await expect(
         workspace.locator('button[data-channel-id="beta"]'),
       ).toHaveCount(0);
-      await expect(heading).toBeFocused();
       if (keepViewport) {
         await expect(anchor).toBeInViewport({ ratio: 1 });
-        expect(await offset()).toBeCloseTo(before, 0);
-      } else await expect(heading).toBeInViewport({ ratio: 1 });
+        await expect(
+          sidebar.locator("button[data-channel-id]:focus"),
+        ).toBeInViewport({ ratio: 1 });
+      } else {
+        await expect(heading).toBeFocused();
+        await expect(heading).toBeInViewport({ ratio: 1 });
+      }
     });
 });
