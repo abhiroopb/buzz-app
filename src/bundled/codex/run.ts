@@ -21,6 +21,7 @@ export const codexRun = (
   | "models"
   | "retire"
   | "sessionAdmission"
+  | "invocationRouting"
   | "supportsGuardedWake"
   | "sessionControls"
   | "run"
@@ -32,6 +33,7 @@ export const codexRun = (
 > => ({
   supportsGuardedWake: true,
   sessionAdmission: true,
+  invocationRouting: true,
   models: (agent) => runtime.preview(agent),
   retire: (agent) => runtime.retire(agent),
   sessionControls: {

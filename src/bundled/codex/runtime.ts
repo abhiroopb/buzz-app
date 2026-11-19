@@ -1797,6 +1797,7 @@ export class CodexRuntime {
             throw new Error("The remote Codex lifetime is unavailable");
           await runtime.run({
             ...delivery,
+            routeConversation: async () => route,
             ...(admitted
               ? { session: admitted.session, sessionContext: admitted.context }
               : {}),

@@ -1079,6 +1079,7 @@ export class ClaudeRuntime {
             throw new Error("The remote Claude lifetime is unavailable");
           await runtime.run({
             ...delivery,
+            routeConversation: async () => route,
             ...(session ? { session } : {}),
             ...(sessionContext ? { sessionContext } : {}),
             signal: accepted,

@@ -17,6 +17,7 @@ export const claudeRun = (
   AgentType<Config>,
   | "models"
   | "sessionAdmission"
+  | "invocationRouting"
   | "supportsGuardedWake"
   | "sessionControls"
   | "run"
@@ -28,6 +29,7 @@ export const claudeRun = (
 > => ({
   supportsGuardedWake: true,
   sessionAdmission: true,
+  invocationRouting: true,
   models: (agent) => runtime.models(agent.key, agent.config),
   sessionControls: {
     scope: (agent) => config(agent.config).scope,
