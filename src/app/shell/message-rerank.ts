@@ -156,6 +156,10 @@ export function useMessageRerank({
   const hold = useRef(held);
   hold.current = held;
   const answering = answers(useStatus(decisions));
+  // Facts are read when the calls start, so a profile that loads while the
+  // results settle still counts.
+  const latestFacts = useRef(facts);
+  latestFacts.current = facts;
   const ids = messages.slice(0, RERANK_LIMIT).map(({ id }) => id);
   const key = enabled ? JSON.stringify([query, ids]) : "";
   const [result, setResult] = useState<{
@@ -163,7 +167,7 @@ export function useMessageRerank({
     ids: readonly string[];
     order: string[];
   }>();
-  // biome-ignore lint/correctness/useExhaustiveDependencies: The key names the request; messages and facts are read as it starts.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: The key names the request; messages are read as it starts.
   useEffect(() => {
     if (!key || !decisions || !answering || ids.length < 2) return;
     let live = true;
@@ -171,7 +175,12 @@ export function useMessageRerank({
       // Someone who moved or chose during the settle keeps this order, so
       // their query and hits aren't sent for an answer that would be dropped.
       if (hold.current) return;
-      const requests = rerankRequests(query, messages, facts, community);
+      const requests = rerankRequests(
+        query,
+        messages,
+        latestFacts.current,
+        community,
+      );
       void Promise.all(
         requests.map((request) => decisions.decide(request)),
       ).then((replies) => {
