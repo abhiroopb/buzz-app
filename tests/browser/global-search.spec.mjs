@@ -157,8 +157,8 @@ test("changing search scope returns focus to the input without clearing the quer
     name: "Search this conversation",
   });
   await expect(scopedInput).toBeFocused();
-  await page.keyboard.type("hello");
-  await expect(scopedInput).toHaveValue("hello");
+  await page.keyboard.type("Alpha");
+  await expect(scopedInput).toHaveValue("Alpha");
 
   const chip = scoped.getByRole("button", {
     name: /Remove .* search scope/,
@@ -168,7 +168,7 @@ test("changing search scope returns focus to the input without clearing the quer
   const global = page.getByRole("dialog", { name: "Search Buzz" });
   const input = global.getByRole("combobox", { name: "Search Buzz" });
   await expect(input).toBeFocused();
-  await expect(input).toHaveValue("hello");
+  await expect(input).toHaveValue("Alpha");
   // Relevance can put an inline setting or plugin first.
   const first = global
     .locator("[data-search-result], .search-control-row")
