@@ -2384,7 +2384,6 @@ function ThreadMessages({
             scope={scope}
             channelId={channelId}
             threadRootId={resolvedRoot}
-            targetId={messageId === resolvedRoot ? undefined : messageId}
             canOpen={(target) => canOpenLink?.(target) ?? false}
             open={onOpenLink}
           />
