@@ -111,7 +111,8 @@ export function ChannelSidebarRow({
         for (const candidate of candidates) {
           if (!candidate?.isConnected || candidate.closest("[hidden], [inert]"))
             continue;
-          candidate.focus();
+          // A background update can remove a focused row the user scrolled past.
+          candidate.focus({ preventScroll: true });
           if (document.activeElement === candidate) break;
         }
       });

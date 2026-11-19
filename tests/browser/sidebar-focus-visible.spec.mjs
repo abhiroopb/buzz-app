@@ -99,3 +99,70 @@ test("closing a heading's dialog with the mouse leaves its menu button visible",
   await expect(more).toBeFocused();
   await expect.poll(() => more.evaluate(unseen)).toBe("");
 });
+
+test.describe("passive channel removal", () => {
+  const soloIds = Array.from(
+    { length: 16 },
+    (_, index) =>
+      `c0000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
+  );
+
+  test.use({
+    sidebarIcons: false,
+    channelIds: ["alpha", "beta", ...soloIds],
+    ownSoloChannels: soloIds,
+    soloChannels: soloIds,
+  });
+
+  // Only a browser can show that recovering keyboard focus scrolls a list
+  // after a relay update, even when the user has already scrolled elsewhere.
+  test("keeps the visible Solo row when a focused channel is archived above it", async ({
+    page,
+    app,
+  }) => {
+    await page.setViewportSize({ width: 1100, height: 430 });
+    await page.goto(app.origin);
+    await openPage(page, "Messages");
+    const sidebar = page.getByRole("navigation", {
+      name: "Subscribed channels",
+    });
+    const workspace = sidebar.locator('[data-sidebar-section="group:work"]');
+    const beta = workspace.getByRole("button", { name: "Beta", exact: true });
+    const anchor = sidebar.locator(
+      `button[data-solo-destination-id="${soloIds[8]}"]`,
+    );
+    await expect(anchor).toBeVisible();
+    await expect.poll(() => app.relay.hasRoute("primary", "beta")).toBe(true);
+    await beta.focus();
+    await anchor.evaluate((row) => {
+      const viewport = row.closest("nav");
+      viewport.scrollTop +=
+        row.getBoundingClientRect().top -
+        viewport.getBoundingClientRect().top -
+        10;
+    });
+    await expect(beta).toBeFocused();
+    await expect(beta).not.toBeInViewport();
+    await expect(anchor).toBeInViewport({ ratio: 1 });
+    const offset = () =>
+      anchor.evaluate(
+        (row) =>
+          row.getBoundingClientRect().top -
+          row.closest("nav").getBoundingClientRect().top,
+      );
+    const before = await offset();
+
+    app.setChannelMetadata("beta", [
+      ["name", "Beta"],
+      ["t", "stream"],
+      ["public"],
+      ["archived", "true"],
+    ]);
+    await expect(
+      workspace.locator('button[data-channel-id="beta"]'),
+    ).toHaveCount(0);
+    await expect(workspace.locator("summary")).toBeFocused();
+    await expect(anchor).toBeInViewport({ ratio: 1 });
+    expect(await offset()).toBeCloseTo(before, 0);
+  });
+});
