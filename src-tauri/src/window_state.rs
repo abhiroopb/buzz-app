@@ -56,8 +56,11 @@ pub(crate) fn onboarding_preserve_window<R: Runtime>(
     save_scale(&window);
     let bytes = std::fs::read(dir.join(app.filename())).map_err(|e| e.to_string())?;
     preserve_intro_geometry(&target, &bytes)?;
-    if let Err(error) = write_scale(&window, INTRO_SCALE) {
-        eprintln!("Could not save Buzz window scale: {error}");
+    // The snapshot copies the plugin's file, so it takes the scale paired with it.
+    if let Err(error) = std::fs::copy(dir.join(SCALE), dir.join(INTRO_SCALE)) {
+        if error.kind() != std::io::ErrorKind::NotFound {
+            eprintln!("Could not save Buzz window scale: {error}");
+        }
     }
     Ok(())
 }
@@ -66,23 +69,35 @@ pub(crate) fn onboarding_preserve_window<R: Runtime>(
 /// Call wherever the plugin saves, while the window still exists.
 pub(crate) fn save_scale<R: Runtime>(window: &Window<R>) {
     if window.label() == "main" {
-        if let Err(error) = write_scale(window, SCALE) {
+        if let Err(error) = write_scale(window) {
             eprintln!("Could not save Buzz window scale: {error}");
         }
     }
 }
 
-fn write_scale<R: Runtime>(window: &Window<R>, name: &str) -> tauri::Result<()> {
-    let dir = window.app_handle().path().app_config_dir()?;
-    let scale = HashMap::from([(
-        window.label(),
-        SavedScale {
-            scale: window.scale_factor()?,
-        },
-    )]);
-    std::fs::create_dir_all(&dir)?;
-    std::fs::write(dir.join(name), serde_json::to_vec(&scale)?)?;
+fn write_scale<R: Runtime>(window: &Window<R>) -> tauri::Result<()> {
+    let path = window.app_handle().path().app_config_dir()?.join(SCALE);
+    // The plugin's save condition: while maximized or minimized, it keeps the
+    // normal frame it cached earlier, so the scale recorded with it stays too.
+    let frame_kept = window.is_maximized()? || window.is_minimized()?;
+    record_scale(&path, window.label(), window.scale_factor()?, frame_kept)?;
     Ok(())
+}
+
+fn record_scale(
+    path: &std::path::Path,
+    label: &str,
+    scale: f64,
+    frame_kept: bool,
+) -> std::io::Result<()> {
+    if frame_kept {
+        return Ok(());
+    }
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    let scale = HashMap::from([(label, SavedScale { scale })]);
+    std::fs::write(path, serde_json::to_vec(&scale)?)
 }
 
 #[derive(Serialize, Deserialize)]
@@ -911,6 +926,24 @@ mod tests {
         assert!(!dir.path().join(super::INTRO_GEOMETRY).exists());
         assert!(!dir.path().join(super::INTRO_SCALE).exists());
         assert!(dir.path().join(super::SCALE).exists());
+    }
+
+    #[test]
+    fn scale_is_kept_while_the_plugin_keeps_its_cached_normal_frame() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(super::SCALE);
+        let scale = || super::saved_scale(&std::fs::read(&path).unwrap(), "main");
+        super::record_scale(&path, "main", 2.0, false).unwrap();
+        // Maximized or minimized on a 1x screen: the plugin keeps the frame
+        // captured at 2x, so the 2x scale stays paired with it.
+        super::record_scale(&path, "main", 1.0, true).unwrap();
+        assert_eq!(scale(), Some(2.0));
+        super::record_scale(&path, "main", 1.0, false).unwrap();
+        assert_eq!(scale(), Some(1.0));
+        // With no earlier scale, none is written, and restore works as before.
+        let fresh = dir.path().join("fresh.json");
+        super::record_scale(&fresh, "main", 1.0, true).unwrap();
+        assert!(!fresh.exists());
     }
 
     #[test]
