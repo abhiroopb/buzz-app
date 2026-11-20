@@ -208,8 +208,9 @@ attachment, such as a picture in a pull request, in Buzz's fullscreen viewer.
 Inject `react` and `conversation`, render it while the image is open, and stop
 rendering it when `onClose` runs (Escape, the backdrop or the close button). It
 takes an https `src` and an optional `name` for its header. Relay-hosted media
-loads through the session's signed read, as message media does; any other
-source, or media the session cannot read, renders nothing and calls `onClose`. The type-only author package exports
+loads through the session's signed read, as message media does, and other
+https images load directly. Any other source, or relay media the session cannot
+read, renders nothing and calls `onClose`. The type-only author package exports
 `ImageViewerProps`. Older hosts lack this entry; check its presence and keep a
 link to the image when supporting those hosts.
 
