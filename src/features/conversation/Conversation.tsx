@@ -1,3 +1,4 @@
+import { hostComposerProvenance } from "../messages/mention-draft";
 import { ActivityIndicatorPresentation } from "./typing-presentation";
 import {
   createContext,
@@ -16,7 +17,7 @@ import {
   type ChannelTimelineProps,
 } from "../messages/ChannelTimeline";
 import {
-  HostMessageComposer,
+  MessageComposer,
   type MessageComposerProps,
 } from "../messages/MessageComposer";
 import {
@@ -310,7 +311,8 @@ export function ConversationComposer(props: Own<MessageComposerProps>) {
     shared.soloConversation,
   );
   return (
-    <HostMessageComposer
+    <MessageComposer
+      evidenceOwner={hostComposerProvenance}
       {...shared}
       {...(shared.soloConversation
         ? {

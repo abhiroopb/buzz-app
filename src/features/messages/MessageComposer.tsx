@@ -150,6 +150,7 @@ import {
   mentionDraft,
   editorMention,
   hasHumanMentionSelection,
+  hostComposerProvenance,
   stageableGif,
   type MentionDraft,
   type MentionRecipient,
@@ -405,17 +406,11 @@ export type MessageComposerProps = {
 };
 
 /** Safe to retarget through ordinary props; callers do not own internal remount keys. */
-export function MessageComposer(props: MessageComposerProps) {
-  return mountComposer(props, false);
-}
-
-/** Built-in conversation entry point. Plugin-provided composers may seed drafts. */
-export function HostMessageComposer(props: MessageComposerProps) {
-  return mountComposer(props, true);
-}
-
-type OwnedComposerProps = MessageComposerProps & { ownerProvenance: boolean };
-function mountComposer(props: MessageComposerProps, ownerProvenance: boolean) {
+export function MessageComposer({
+  evidenceOwner,
+  ...props
+}: MessageComposerProps & { evidenceOwner?: typeof hostComposerProvenance }) {
+  const ownerProvenance = evidenceOwner === hostComposerProvenance;
   const key = `${props.submission?.draftKey ?? ""}:${messageViewKey(
     props.session,
     props.scope,
@@ -435,6 +430,7 @@ function mountComposer(props: MessageComposerProps, ownerProvenance: boolean) {
   );
 }
 
+type OwnedComposerProps = MessageComposerProps & { ownerProvenance: boolean };
 function PersonalComposer(props: OwnedComposerProps) {
   const { session, channelId, submission, agentFilter } = props;
   const choices = useAgentChoices(session, true, true);

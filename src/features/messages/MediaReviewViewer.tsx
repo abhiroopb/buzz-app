@@ -1,3 +1,4 @@
+import { hostComposerProvenance } from "./mention-draft";
 import { TypingIndicator } from "./TypingIndicator";
 import { workflowLabel } from "../relay/workflow-attribution";
 import { MessageEditScope } from "./MessageEditScope";
@@ -36,7 +37,7 @@ import { compareMessages } from "../relay/message-order";
 import { useProfileGeneration, useRowProfiles } from "../relay/react";
 import { rowProfileIds } from "../relay/membership";
 import { useKnownAgentPubkeys } from "../agents/use-known";
-import { HostMessageComposer } from "./MessageComposer";
+import { MessageComposer } from "./MessageComposer";
 import { ImageReviewStage } from "./ImageReviewStage";
 import { MessageRow } from "./MessageRow";
 import {
@@ -523,7 +524,8 @@ function ReviewShell({
                     if (attachment.kind === "video") video.current?.pause();
                   }}
                 >
-                  <HostMessageComposer
+                  <MessageComposer
+                    evidenceOwner={hostComposerProvenance}
                     shown={commentsOpen}
                     extensions={extensions}
                     session={session}

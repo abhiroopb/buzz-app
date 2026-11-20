@@ -1,4 +1,5 @@
-import { HostMessageComposer } from "../../src/features/messages/MessageComposer";
+import { hostComposerProvenance } from "../../src/features/messages/mention-draft";
+import { MessageComposer } from "../../src/features/messages/MessageComposer";
 import "../../src/shared/styles/globals.css";
 import { useKeyboardFocusVisibility } from "../../src/shared/design-system/useKeyboardFocusVisibility";
 import { AgentSettings } from "../../src/app/AgentSettings";
@@ -535,7 +536,8 @@ function Fixture() {
         </>
       )}
       <div style={{ width: "100%", maxWidth: 720 }}>
-        <HostMessageComposer
+        <MessageComposer
+          evidenceOwner={hostComposerProvenance}
           extensions={conversation}
           disabled={disabled}
           session={namedSession}

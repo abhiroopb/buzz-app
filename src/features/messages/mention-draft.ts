@@ -15,6 +15,8 @@ export type DraftRecipient = MentionRecipient &
   Readonly<{ start: number; end: number }>;
 
 let humanMentionSelection = false;
+/** The host's own composer entry points can collect local send evidence. */
+export const hostComposerProvenance = Symbol("host composer provenance");
 /** The bundled picker and completion UI own the browser event. Plugin commands
  * can insert recipients, but only this synchronous selection carries proof. */
 export function withHumanMentionSelection<T>(event: Event, select: () => T): T {

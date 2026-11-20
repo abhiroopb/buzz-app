@@ -1,3 +1,4 @@
+import { hostComposerProvenance } from "../messages/mention-draft";
 import { sendWithOwnerMentions } from "../relay/owner-mentions";
 import { linkedDraftKey, readLinkedChat, type LinkedChat } from "./linked-chat";
 import {
@@ -27,7 +28,7 @@ import {
   subscribeView,
   viewRevision,
 } from "../../shared/view-state";
-import { HostMessageComposer } from "../messages/MessageComposer";
+import { MessageComposer } from "../messages/MessageComposer";
 import {
   parseSoloModelPicks,
   soloModelPicksKey,
@@ -879,7 +880,8 @@ export function SoloDraft({
   };
   const composer = (
     <div id="new-chat-prompt" ref={prompt}>
-      <HostMessageComposer
+      <MessageComposer
+        evidenceOwner={hostComposerProvenance}
         key={restored.count}
         focusRequest={restored.focus ? restored.count : 0}
         chatPresentation

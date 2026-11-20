@@ -1,3 +1,4 @@
+import { hostComposerProvenance } from "../messages/mention-draft";
 import { sendWithOwnerMentions } from "../relay/owner-mentions";
 import { AvatarStack } from "../../shared/design-system/ui/AvatarStack";
 import { agentUnavailable, canMessageAgent } from "../agents/choices";
@@ -30,7 +31,7 @@ import {
   clearAttachmentDraft,
   type AttachmentDraft,
 } from "../messages/attachment-draft";
-import { HostMessageComposer } from "../messages/MessageComposer";
+import { MessageComposer } from "../messages/MessageComposer";
 import { mentionDraft, type MentionDraft } from "../messages/mention-draft";
 import { clearView, readView, writeView } from "../../shared/view-state";
 import type { MessageIntent } from "../channel-navigation/routes";
@@ -660,7 +661,8 @@ export function NewMessage({
         )}
       </div>
       <DraftMentionRoster.Provider value={roster}>
-        <HostMessageComposer
+        <MessageComposer
+          evidenceOwner={hostComposerProvenance}
           key={`${ready ? "ready" : "hydrating"}:${draftRevision}`}
           session={session}
           scope={scope}
