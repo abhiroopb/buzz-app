@@ -1087,3 +1087,74 @@ it("ignores an older list response that arrives after a newer one", async () => 
   expect(list).toHaveTextContent("Link 2b9c8f7e");
   expect(list).not.toHaveTextContent("Link 1b9c8f7e");
 });
+
+it("keeps Links hidden on Members and drops only an unsent confirmation", async () => {
+  const user = userEvent.setup();
+  const calls = broker({
+    invites: () => Response.json({ invites: [link(1)], next_before: null }),
+  });
+  const { relay: data } = relay(owner);
+  const active = () => true;
+  const view = render(
+    <CommunityAdmin relay={data} active={active} selectedMethod="links" />,
+  );
+  await user.click(await screen.findByRole("button", { name: /^Revoke Link/ }));
+  expect(await screen.findByRole("alertdialog")).toBeVisible();
+  view.rerender(
+    <CommunityAdmin relay={data} active={active} selectedMethod="members" />,
+  );
+  expect(
+    screen.getByRole("list", { name: "Invite links", hidden: true }),
+  ).not.toBeVisible();
+  await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+  view.rerender(
+    <CommunityAdmin relay={data} active={active} selectedMethod="links" />,
+  );
+  expect(
+    await screen.findByRole("list", { name: "Invite links" }),
+  ).toBeVisible();
+  expect(screen.queryByRole("alertdialog")).toBeNull();
+  expect(calls.some((c) => c.route === "invite-revoke")).toBe(false);
+});
+
+it("shows a revoke failure that arrived while Links was hidden", async () => {
+  const user = userEvent.setup();
+  let finish!: (response: Response) => void;
+  const held = new Promise<Response>((resolve) => {
+    finish = resolve;
+  });
+  broker({
+    invites: () => Response.json({ invites: [link(1)], next_before: null }),
+    "invite-revoke": () => held,
+  });
+  const { relay: data } = relay(owner);
+  const active = () => true;
+  const view = render(
+    <CommunityAdmin relay={data} active={active} selectedMethod="links" />,
+  );
+  await user.click(await screen.findByRole("button", { name: /^Revoke Link/ }));
+  await user.click(
+    within(await screen.findByRole("alertdialog")).getByRole("button", {
+      name: "Revoke",
+    }),
+  );
+  view.rerender(
+    <CommunityAdmin relay={data} active={active} selectedMethod="members" />,
+  );
+  await act(async () => {
+    finish(unavailable());
+    await held.catch(() => {});
+  });
+  view.rerender(
+    <CommunityAdmin relay={data} active={active} selectedMethod="links" />,
+  );
+  const dialog = await screen.findByRole("alertdialog");
+  expect(within(dialog).getByRole("alert")).toHaveTextContent(
+    "community writes are temporarily unavailable",
+  );
+  expect(within(dialog).getByRole("button", { name: "Retry" })).toBeEnabled();
+  // The open modal hides the list from the accessibility tree.
+  expect(
+    screen.getByRole("list", { name: "Invite links", hidden: true }),
+  ).toHaveTextContent("Active");
+});

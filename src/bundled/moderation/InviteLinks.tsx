@@ -137,13 +137,11 @@ export function InviteLinks({
     },
     [],
   );
-  // Leaving the tab drops an unsent confirmation, as Members does.
+  // Leaving the tab drops an unsent confirmation, as Members does; a sent
+  // attempt stays, so its failure shows on return.
   useEffect(() => {
-    if (!visible && !revoking) {
-      setPending(null);
-      setRevokeError("");
-    }
-  }, [visible, revoking]);
+    if (!visible && !revoking && !revokeError) setPending(null);
+  }, [visible, revoking, revokeError]);
 
   const pastedCode = pasted.trim() ? pastedInviteCode(community, pasted) : null;
   const pastedError =
