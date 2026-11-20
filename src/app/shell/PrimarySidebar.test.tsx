@@ -1033,6 +1033,18 @@ it("shows a region channel group with its Team row", async () => {
     expect(group()).toContainElement(
       screen.getByRole("textbox", { name: "Task draft" }),
     );
+
+    // Focus in a control the hidden row takes with it moves to a surviving heading.
+    const section = row()?.closest("[data-sidebar-section]");
+    const heading = section?.querySelector("summary");
+    expect(heading).toBeInstanceOf(HTMLElement);
+    for (const name of ["Toggle Source tasks", "New task in Source"]) {
+      screen.getByRole("button", { name }).focus();
+      await act(() => hide(true));
+      await waitFor(() => expect(heading).toHaveFocus());
+      await act(() => hide(false));
+      expect(group()).toContainElement(row() as HTMLElement);
+    }
   } finally {
     view.unmount();
     await h.dispose();

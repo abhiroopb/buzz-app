@@ -184,6 +184,11 @@ export function RegionChannelGroup(props: SoloChannelGroupProps) {
   useLayoutEffect(() => {
     if (!portalSlot) return;
     const channelId = props.channelId;
+    // The row's section, read while the row is still mounted.
+    const section =
+      portalSlot
+        .closest("[data-sidebar-section]")
+        ?.getAttribute("data-sidebar-section") ?? "";
     const enter = (event: FocusEvent) => {
       const target = event.target;
       slotFocus.current =
@@ -222,7 +227,14 @@ export function RegionChannelGroup(props: SoloChannelGroupProps) {
           document.querySelector<HTMLElement>(
             `button[data-channel-id="${CSS.escape(channelId)}"]`,
           ),
+          // A contribution can hide the row itself: use a surviving heading.
+          document.querySelector<HTMLElement>(
+            `[data-sidebar-section="${CSS.escape(section)}"] summary`,
+          ),
           document.querySelector<HTMLElement>("[data-solo-heading]"),
+          ...document.querySelectorAll<HTMLElement>(
+            '[data-sidebar-section^="solo-region:"] summary',
+          ),
         ];
         for (const candidate of candidates) {
           if (!candidate || candidate.closest("[hidden], [inert]")) continue;
