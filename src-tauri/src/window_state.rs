@@ -20,8 +20,9 @@ pub(crate) fn builder() -> Builder {
 
 // Called from app setup, after the configured main window has been created.
 const INTRO_GEOMETRY: &str = "onboarding-window-restore.json";
-// The plugin saves physical pixels without the scale they were measured at.
-// Buzz records it beside each save, as {"main": {"scale": 2.0}}.
+// The plugin saves physical pixels without the scales they were measured at.
+// Buzz records them beside each save, as
+// {"main": {"scale": 2.0, "position": 1.0, "prev": 2.0}} (see `SavedScale`).
 const SCALE: &str = ".window-scale.json";
 const INTRO_SCALE: &str = "onboarding-window-scale.json";
 
@@ -64,10 +65,19 @@ pub(crate) fn onboarding_preserve_window<R: Runtime>(
     Ok(())
 }
 
-/// The scale of the plugin's cached frame. It starts from the scale file, as
-/// the plugin's cache starts from its file, and follows each cache update.
+/// The scales of the plugin's cached frame: its size, its position, and the
+/// position before that (`prev_x`/`prev_y`, used for a maximized window). The
+/// plugin updates size and position on different events, so each keeps its own.
+/// They start from the scale file, as the plugin's cache starts from its file.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+struct Kept {
+    size: Option<f64>,
+    position: Option<f64>,
+    prev: Option<f64>,
+}
+
 #[derive(Default)]
-struct KeptScale(std::sync::Mutex<Option<f64>>);
+struct KeptScale(std::sync::Mutex<Kept>);
 
 fn kept_scale<R: Runtime>(app: &tauri::AppHandle<R>) -> tauri::State<'_, KeptScale> {
     if app.try_state::<KeptScale>().is_none() {
@@ -75,51 +85,112 @@ fn kept_scale<R: Runtime>(app: &tauri::AppHandle<R>) -> tauri::State<'_, KeptSca
             let bytes = std::fs::read(dir.join(SCALE)).ok()?;
             saved_scale(&bytes, "main")
         });
-        app.manage(KeptScale(std::sync::Mutex::new(file)));
+        let kept = file.map_or_else(Kept::default, |saved| Kept {
+            size: Some(saved.scale),
+            position: Some(saved.position()),
+            prev: Some(saved.prev()),
+        });
+        app.manage(KeptScale(std::sync::Mutex::new(kept)));
     }
     app.state::<KeptScale>()
 }
 
-/// Call where the plugin updates its cached frame: on Resized (`resized`),
-/// on CloseRequested, and at Exit.
-pub(crate) fn follow_scale<R: Runtime>(window: &Window<R>, resized: bool) {
-    let read = || -> tauri::Result<bool> {
-        // tauri#5812: on Resized, the plugin treats an undecorated or fixed-size
-        // macOS window as never maximized.
-        let quirk = resized
-            && cfg!(target_os = "macos")
-            && (!window.is_decorated()? || !window.is_resizable()?);
-        let maximized = !quirk && window.is_maximized()?;
-        Ok(reads_frame(maximized, window.is_minimized()?))
-    };
-    if window.label() == "main" && read().unwrap_or(false) {
-        if let Ok(scale) = window.scale_factor() {
-            *kept_scale(window.app_handle()).0.lock().unwrap() = Some(scale);
+/// An update of the plugin's cached frame (window-state 2.5.0).
+#[derive(Clone, Copy, Debug)]
+enum Update {
+    /// `Moved`: position, unless minimized; the old position becomes `prev`.
+    Moved,
+    /// `Resized`: size, unless minimized or maximized.
+    Resized,
+    /// `CloseRequested` and the save at Exit: size and position, unless
+    /// minimized or maximized.
+    Saved,
+}
+
+/// What the plugin reads from the window for an update.
+#[derive(Clone, Copy, Debug)]
+struct Frame {
+    maximized: bool,
+    minimized: bool,
+    scale: f64,
+}
+
+impl Kept {
+    fn apply(&mut self, update: Update, frame: Frame) {
+        let reads_frame = !frame.maximized && !frame.minimized;
+        match update {
+            Update::Moved if !frame.minimized => {
+                self.prev = self.position;
+                self.position = Some(frame.scale);
+            }
+            Update::Resized if reads_frame => self.size = Some(frame.scale),
+            Update::Saved if reads_frame => {
+                self.size = Some(frame.scale);
+                self.position = Some(frame.scale);
+            }
+            _ => {}
         }
     }
 }
 
-/// The plugin's condition for reading the window's frame into its cache.
-fn reads_frame(maximized: bool, minimized: bool) -> bool {
-    !maximized && !minimized
+/// Follows the plugin's cache: call it for each main-window event.
+pub(crate) fn window_event<R: Runtime>(window: &Window<R>, event: &tauri::WindowEvent) {
+    let update = match event {
+        tauri::WindowEvent::Moved(_) => Update::Moved,
+        tauri::WindowEvent::Resized(_) => Update::Resized,
+        tauri::WindowEvent::CloseRequested { .. } => Update::Saved,
+        _ => return,
+    };
+    follow(window, update);
 }
 
-/// Record the scale beside a save of the plugin's file (Exit or onboarding),
+fn follow<R: Runtime>(window: &Window<R>, update: Update) {
+    let read = || -> tauri::Result<Frame> {
+        // tauri#5812: on Resized, the plugin treats an undecorated or fixed-size
+        // macOS window as never maximized.
+        let quirk = matches!(update, Update::Resized)
+            && cfg!(target_os = "macos")
+            && (!window.is_decorated()? || !window.is_resizable()?);
+        Ok(Frame {
+            maximized: !quirk && window.is_maximized()?,
+            minimized: window.is_minimized()?,
+            scale: window.scale_factor()?,
+        })
+    };
+    if window.label() != "main" {
+        return;
+    }
+    if let Ok(frame) = read() {
+        kept_scale(window.app_handle())
+            .0
+            .lock()
+            .unwrap()
+            .apply(update, frame);
+    }
+}
+
+/// Record the scales beside a save of the plugin's file (Exit or onboarding),
 /// after the plugin's save has updated its cache.
 pub(crate) fn save_scale<R: Runtime>(app: &tauri::AppHandle<R>) {
     if let Some(window) = app.get_webview_window("main") {
-        follow_scale(&window.as_ref().window(), false);
+        follow(&window.as_ref().window(), Update::Saved);
     }
     write_kept_scale(app);
 }
 
 fn write_kept_scale<R: Runtime>(app: &tauri::AppHandle<R>) {
-    let Some(scale) = *kept_scale(app).0.lock().unwrap() else {
+    let kept = *kept_scale(app).0.lock().unwrap();
+    let Some(scale) = kept.size else {
         return;
+    };
+    let saved = SavedScale {
+        scale,
+        position: kept.position,
+        prev: kept.prev,
     };
     let result = app.path().app_config_dir().and_then(|dir| {
         std::fs::create_dir_all(&dir)?;
-        let scale = HashMap::from([("main", SavedScale { scale })]);
+        let scale = HashMap::from([("main", saved)]);
         std::fs::write(dir.join(SCALE), serde_json::to_vec(&scale)?)?;
         Ok(())
     });
@@ -128,17 +199,33 @@ fn write_kept_scale<R: Runtime>(app: &tauri::AppHandle<R>) {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+/// `scale` is the size's. A missing `position` is at the size's scale, and a
+/// missing `prev` at the position's.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 struct SavedScale {
     scale: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    position: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    prev: Option<f64>,
 }
 
-fn saved_scale(bytes: &[u8], label: &str) -> Option<f64> {
+impl SavedScale {
+    fn position(&self) -> f64 {
+        self.position.unwrap_or(self.scale)
+    }
+
+    fn prev(&self) -> f64 {
+        self.prev.unwrap_or(self.position())
+    }
+}
+
+fn saved_scale(bytes: &[u8], label: &str) -> Option<SavedScale> {
+    let valid = |scale: f64| scale.is_finite() && scale > 0.0;
     serde_json::from_slice::<HashMap<String, SavedScale>>(bytes)
         .ok()?
         .remove(label)
-        .map(|saved| saved.scale)
-        .filter(|scale| scale.is_finite() && *scale > 0.0)
+        .filter(|saved| valid(saved.scale) && valid(saved.position()) && valid(saved.prev()))
 }
 
 /// The Mac window shows `--bg-app` (tokens.css) under the page instead of the
@@ -183,28 +270,49 @@ fn preserve_intro_geometry(target: &std::path::Path, bytes: &[u8]) -> Result<(),
 }
 
 pub(crate) fn restore<R: Runtime>(window: &Window<R>) -> tauri::Result<()> {
-    // Read the scale file before restore's own resizes update the kept scale.
+    // Read the scale file before restore's own resizes update the kept scales.
     kept_scale(window.app_handle());
     let dir = window.app_handle().path().app_config_dir()?;
-    let pending = dir.join(INTRO_GEOMETRY);
-    if let Ok(bytes) = std::fs::read(&pending) {
-        if let Some(saved) = saved_geometry(&bytes, window.label()) {
-            window.set_fullscreen(false)?;
-            window.unmaximize()?;
-            restore_geometry_from(window, Some(bytes), dir.join(INTRO_SCALE))?;
-            window.set_fullscreen(saved.fullscreen)?;
-            if saved.maximized {
-                window.maximize()?;
-            }
-            std::fs::remove_file(pending)?;
-            let _ = std::fs::remove_file(dir.join(INTRO_SCALE));
-            return Ok(());
+    let filename = window.app_handle().filename();
+    if let Some((saved, scales)) = restore_input(&dir, &filename, window.label(), true) {
+        let (fullscreen, maximized) = (saved.fullscreen, saved.maximized);
+        window.set_fullscreen(false)?;
+        window.unmaximize()?;
+        restore_geometry(window, saved, scales)?;
+        window.set_fullscreen(fullscreen)?;
+        if maximized {
+            window.maximize()?;
+        }
+        std::fs::remove_file(dir.join(INTRO_GEOMETRY))?;
+        let _ = std::fs::remove_file(dir.join(INTRO_SCALE));
+        return Ok(());
+    }
+    if let Some((saved, scales)) = restore_input(&dir, &filename, window.label(), false) {
+        if let Err(error) = restore_geometry(window, saved, scales) {
+            eprintln!("Could not restore Buzz window geometry: {error}");
         }
     }
-    if let Err(error) = restore_geometry(window) {
-        eprintln!("Could not restore Buzz window geometry: {error}");
-    }
     window.restore_state(StateFlags::MAXIMIZED | StateFlags::FULLSCREEN)
+}
+
+/// The geometry to restore and the scales recorded with it: the onboarding
+/// snapshot (`intro`) and its scale copy, or the plugin's file and Buzz's.
+fn restore_input(
+    dir: &std::path::Path,
+    filename: &str,
+    label: &str,
+    intro: bool,
+) -> Option<(SavedGeometry, Option<SavedScale>)> {
+    let (geometry, scale) = if intro {
+        (INTRO_GEOMETRY, INTRO_SCALE)
+    } else {
+        (filename, SCALE)
+    };
+    let saved = saved_geometry(&std::fs::read(dir.join(geometry)).ok()?, label)?;
+    let scales = std::fs::read(dir.join(scale))
+        .ok()
+        .and_then(|bytes| saved_scale(&bytes, label));
+    Some((saved, scales))
 }
 
 // Read-only adapter for window-state 2.4.1's format: position is the outer
@@ -235,32 +343,15 @@ fn saved_geometry(bytes: &[u8], label: &str) -> Option<SavedGeometry> {
         .filter(|state| state.width > 0 && state.height > 0)
 }
 
-fn restore_geometry<R: Runtime>(window: &Window<R>) -> tauri::Result<()> {
-    let dir = window.app_handle().path().app_config_dir()?;
-    restore_geometry_from(window, None, dir.join(SCALE))
-}
-
-fn restore_geometry_from<R: Runtime>(
+fn restore_geometry<R: Runtime>(
     window: &Window<R>,
-    override_bytes: Option<Vec<u8>>,
-    scale_path: std::path::PathBuf,
+    saved: SavedGeometry,
+    scales: Option<SavedScale>,
 ) -> tauri::Result<()> {
-    let path = window
-        .app_handle()
-        .path()
-        .app_config_dir()?
-        .join(window.app_handle().filename());
-    let Some(saved) = override_bytes
-        .or_else(|| std::fs::read(path).ok())
-        .and_then(|bytes| saved_geometry(&bytes, window.label()))
-    else {
-        return Ok(());
-    };
     // Windows rescales on DPI change, so it keeps sending physical pixels.
-    let recorded = std::fs::read(scale_path)
-        .ok()
-        .and_then(|bytes| saved_scale(&bytes, window.label()))
-        .filter(|_| cfg!(not(windows)));
+    let scales = scales.filter(|_| cfg!(not(windows)));
+    let saved = at_size_scale(saved, scales);
+    let recorded = scales.map(|scales| scales.scale);
     let monitors = window.available_monitors()?;
     let areas: Vec<_> = monitors
         .iter()
@@ -296,6 +387,21 @@ fn restore_geometry_from<R: Runtime>(
         window.set_size(size)?;
     }
     Ok(())
+}
+
+/// Expresses the saved positions in the size's pixels, each from its own scale.
+fn at_size_scale(mut saved: SavedGeometry, scales: Option<SavedScale>) -> SavedGeometry {
+    if let Some(scales) = scales {
+        let rescale = |x: i32, y: i32, from: f64| {
+            let position = PhysicalPosition::new(x, y)
+                .to_logical::<f64>(from)
+                .to_physical::<i32>(scales.scale);
+            (position.x, position.y)
+        };
+        (saved.x, saved.y) = rescale(saved.x, saved.y, scales.position());
+        (saved.prev_x, saved.prev_y) = rescale(saved.prev_x, saved.prev_y, scales.prev());
+    }
+    saved
 }
 
 /// Plans the restore in the saved rect's pixels. With the recorded save-time
@@ -948,7 +1054,8 @@ mod tests {
         let scale = window.scale_factor().unwrap();
         for name in [super::SCALE, super::INTRO_SCALE] {
             let bytes = std::fs::read(dir.path().join(name)).unwrap();
-            assert_eq!(super::saved_scale(&bytes, "main"), Some(scale));
+            let saved = super::saved_scale(&bytes, "main").unwrap();
+            assert_eq!((saved.scale, saved.position), (scale, Some(scale)));
             assert_eq!(super::saved_scale(&bytes, "other"), None);
         }
         assert_eq!(super::saved_scale(br#"{"main":{"scale":0}}"#, "main"), None);
@@ -958,38 +1065,176 @@ mod tests {
         assert!(dir.path().join(super::SCALE).exists());
     }
 
+    fn kept(size: f64, position: f64, prev: f64) -> super::Kept {
+        super::Kept {
+            size: Some(size),
+            position: Some(position),
+            prev: Some(prev),
+        }
+    }
+
+    fn frame(maximized: bool, minimized: bool, scale: f64) -> super::Frame {
+        super::Frame {
+            maximized,
+            minimized,
+            scale,
+        }
+    }
+
     #[test]
-    fn kept_scale_follows_each_update_of_the_plugins_cached_frame() {
+    fn kept_scales_follow_the_plugins_cache_rules() {
+        use super::Update::{Moved, Resized, Saved};
+        let normal = |scale| frame(false, false, scale);
+        // Dragged from a 2x screen to a 1x screen without a Resized, then
+        // minimized and quit: the plugin keeps 2x size and 1x position.
+        let mut scales = kept(2.0, 2.0, 2.0);
+        scales.apply(Moved, normal(1.0));
+        assert_eq!(scales, kept(2.0, 1.0, 2.0));
+        scales.apply(Moved, frame(false, true, 2.0));
+        scales.apply(Resized, frame(false, true, 2.0));
+        scales.apply(Saved, frame(false, true, 2.0));
+        assert_eq!(scales, kept(2.0, 1.0, 2.0));
+        // Maximizing moves the window: the normal origin becomes prev. A
+        // maximized window keeps its cached size, through Resized and saves.
+        scales.apply(Moved, frame(true, false, 2.0));
+        assert_eq!(scales, kept(2.0, 2.0, 1.0));
+        scales.apply(Resized, frame(true, false, 1.0));
+        scales.apply(Saved, frame(true, false, 1.0));
+        assert_eq!(scales, kept(2.0, 2.0, 1.0));
+        // A normal window's save reads both size and position, never prev.
+        scales.apply(Resized, normal(1.0));
+        assert_eq!(scales, kept(1.0, 2.0, 1.0));
+        scales.apply(Saved, normal(2.0));
+        assert_eq!(scales, kept(2.0, 2.0, 1.0));
+    }
+
+    #[test]
+    fn position_and_size_restore_each_at_its_own_scale() {
+        let monitors = mixed_scale_monitors();
+        let scales = |position, prev| super::SavedScale {
+            scale: 2.0,
+            position: Some(position),
+            prev: Some(prev),
+        };
+        // 1200x750 points cached on the 2x laptop, then moved to (2212, -200)
+        // points on the 1x external without a Resized.
+        let saved = super::at_size_scale(
+            decode(&saved_state(2212, -200, 2400, 1500)),
+            Some(scales(1.0, 1.0)),
+        );
+        assert_eq!(
+            logical_request(&saved, Some(2.0), 2.0, &monitors),
+            (
+                tauri::LogicalPosition::new(2212.0, -200.0),
+                tauri::LogicalSize::new(1200.0, 750.0)
+            ),
+        );
+        // Maximized: the normal origin is prev, at prev's scale.
+        let mut state = saved_state(0, 66, 2400, 1500);
+        state["main"]["maximized"] = json!(true);
+        state["main"]["prev_x"] = json!(2212);
+        state["main"]["prev_y"] = json!(-200);
+        let saved = super::at_size_scale(decode(&state), Some(scales(2.0, 1.0)));
+        assert_eq!((saved.x, saved.y), (0, 66));
+        assert_eq!(
+            logical_request(&saved, Some(2.0), 2.0, &monitors).0,
+            tauri::LogicalPosition::new(2212.0, -200.0),
+        );
+        // An older file without position scales reads them as the size's.
+        let only = super::saved_scale(br#"{"main":{"scale":2.0}}"#, "main").unwrap();
+        assert_eq!((only.position(), only.prev()), (2.0, 2.0));
+        let unchanged = super::at_size_scale(decode(&saved_state(200, 66, 2400, 1500)), Some(only));
+        assert_eq!((unchanged.x, unchanged.y), (200, 66));
+        assert_eq!(
+            super::saved_scale(br#"{"main":{"scale":2.0,"prev":0}}"#, "main"),
+            None
+        );
+    }
+
+    #[test]
+    fn restore_reads_the_snapshot_pair_while_pending_else_the_live_pair() {
+        let dir = tempfile::tempdir().unwrap();
+        let write =
+            |name: &str, bytes: &[u8]| std::fs::write(dir.path().join(name), bytes).unwrap();
+        let live = tauri_plugin_window_state::DEFAULT_FILENAME;
+        let input = |intro| super::restore_input(dir.path(), live, "main", intro);
+        assert!(input(true).is_none() && input(false).is_none());
+        write(
+            live,
+            &serde_json::to_vec(&saved_state(100, 120, 960, 640)).unwrap(),
+        );
+        // A plugin file without a scale file restores as on main.
+        assert!(input(false).unwrap().1.is_none());
+        write(super::SCALE, br#"{"main":{"scale":2.0}}"#);
+        write(
+            super::INTRO_GEOMETRY,
+            &serde_json::to_vec(&saved_state(300, 320, 1200, 800)).unwrap(),
+        );
+        write(
+            super::INTRO_SCALE,
+            br#"{"main":{"scale":1.0,"position":2.0}}"#,
+        );
+        let (saved, scales) = input(true).unwrap();
+        assert_eq!((saved.x, saved.width), (300, 1200));
+        assert_eq!(
+            scales,
+            Some(super::SavedScale {
+                scale: 1.0,
+                position: Some(2.0),
+                prev: None
+            })
+        );
+        let (saved, scales) = input(false).unwrap();
+        assert_eq!((saved.x, saved.width), (100, 960));
+        assert_eq!(scales.map(|scales| scales.scale), Some(2.0));
+        assert!(super::restore_input(dir.path(), live, "other", false).is_none());
+    }
+
+    #[test]
+    fn window_events_update_the_kept_scales_and_only_saves_write_them() {
         let (dir, app) = fixture();
         let path = dir.path().join(super::SCALE);
         let disk = br#"{"main":{"scale":2.0}}"#;
         std::fs::write(&path, disk).unwrap();
         let mut plugin = super::builder().build();
         plugin.initialize(app.handle(), Value::Null).unwrap();
-        let window = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
-            .build()
-            .unwrap()
-            .as_ref()
-            .window();
-        plugin.window_created(window.clone());
-        let kept = || *app.state::<super::KeptScale>().0.lock().unwrap();
-        // The kept scale starts from the file, as the plugin's cache does.
-        super::restore(&window).unwrap();
-        assert_eq!(kept(), Some(2.0));
-        // Close only updates the plugin's cache. A crash or Force Quit before
-        // Exit leaves the old geometry on disk, so the old scale stays there too.
-        super::follow_scale(&window, false);
+        let mut window = |label| {
+            let window = tauri::WebviewWindowBuilder::new(&app, label, Default::default())
+                .build()
+                .unwrap()
+                .as_ref()
+                .window();
+            plugin.window_created(window.clone());
+            window
+        };
+        let (main, other) = (window("main"), window("other"));
+        let scales = || *app.state::<super::KeptScale>().0.lock().unwrap();
+        // The kept scales start from the file, as the plugin's cache does.
+        super::restore(&main).unwrap();
+        assert_eq!(scales(), kept(2.0, 2.0, 2.0));
+        // MockRuntime's windows are normal, at 1x.
+        let moved = tauri::WindowEvent::Moved(tauri::PhysicalPosition::new(2212, -200));
+        let resized = tauri::WindowEvent::Resized(tauri::PhysicalSize::new(2400, 1500));
+        super::window_event(&other, &moved);
+        super::window_event(&main, &tauri::WindowEvent::Focused(true));
+        assert_eq!(scales(), kept(2.0, 2.0, 2.0));
+        super::window_event(&main, &moved);
+        assert_eq!(scales(), kept(2.0, 1.0, 2.0));
+        super::window_event(&main, &resized);
+        assert_eq!(scales(), kept(1.0, 1.0, 2.0));
+        // Events only update the cache, like the plugin's: a crash or Force
+        // Quit before Exit leaves the old geometry on disk, and the old scale.
         assert_eq!(std::fs::read(&path).unwrap(), disk);
-        // Dragged to a 1x screen (MockRuntime's scale): Resized caches 1x pixels.
-        super::follow_scale(&window, true);
-        assert_eq!(kept(), Some(1.0));
-        // Maximized, then quit: Exit keeps the cached frame, and its scale.
-        assert!(!super::reads_frame(true, false));
-        assert!(!super::reads_frame(false, true));
-        super::write_kept_scale(app.handle());
+        // Exit: the plugin saves, then Buzz writes the scales of that save.
+        plugin.on_event(app.handle(), &tauri::RunEvent::Exit);
+        super::save_scale(app.handle());
         assert_eq!(
             super::saved_scale(&std::fs::read(&path).unwrap(), "main"),
-            Some(1.0)
+            Some(super::SavedScale {
+                scale: 1.0,
+                position: Some(1.0),
+                prev: Some(2.0)
+            })
         );
     }
 
