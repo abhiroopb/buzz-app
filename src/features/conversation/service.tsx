@@ -39,6 +39,7 @@ import type {
   ConversationWorkspaceProps,
 } from "./contracts";
 import { PluginMarkdown, type MarkdownProps } from "../messages/PluginMarkdown";
+import { ImageViewer } from "../messages/ImageViewer";
 import type { RelaySession } from "../relay/session";
 import {
   ChannelMembersDialog,
@@ -112,6 +113,8 @@ export type Conversation = {
     DocumentEditor: ComponentType<DocumentEditorProps>;
     /** Bounded document Markdown with host-owned link and image trust rules. */
     Markdown: (props: MarkdownProps) => ReactNode;
+    /** Controlled fullscreen viewer for an https image that is not a message attachment. */
+    ImageViewer: typeof ImageViewer;
     Thread: (props: EmbeddedThreadProps) => ReactNode;
     /** One channel's message management, edit target and overlays for a page's
      * own `Message` rows and `Composer`, without visiting the channel. */
@@ -312,6 +315,7 @@ export class ConversationService extends Service implements Conversation {
       MembersDialog: ChannelMembersDialog,
       GeneralAccess: ChannelGeneralAccess,
       DocumentEditor,
+      ImageViewer,
       Markdown: (props: MarkdownProps) => (
         <PluginMarkdown
           {...props}
