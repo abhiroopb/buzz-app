@@ -85,7 +85,7 @@ test("popout works as a standalone list and allows multiple open rows", async ({
     .toBe(true);
 });
 
-test("expanded Settings cards own adjacent borders and keep long text keyboard-scrollable", async ({
+test("expanded Settings cards own adjacent borders and support caller-owned scrolling", async ({
   page,
 }) => {
   await page.setViewportSize({ width: 390, height: 800 });
@@ -129,24 +129,19 @@ test("expanded Settings cards own adjacent borders and keep long text keyboard-s
   await expect.poll(async () => (await divider(card)).visible).toBe(false);
   await expect.poll(async () => (await divider(notes)).visible).toBe(false);
 
-  const body = card.locator(".buzz-accordion-scroll");
-  const frame = card.locator(".buzz-accordion-scroll-frame");
-  await expect(frame).toHaveCSS("border-top-style", "solid");
-  await expect(frame).toHaveCSS("border-top-width", "1px");
-  await expect(frame).toHaveCSS("border-start-start-radius", /[1-9]\d*px/);
-  await expect(body).toHaveAttribute("data-overflow-end", "");
-  await expect(body).not.toHaveCSS("mask-image", "none");
+  const readingArea = card.getByRole("region", {
+    name: "Publishing instructions",
+  });
   await page.keyboard.press("Tab");
-  await expect(body).toBeFocused();
-  await expectKeyboardRing(frame, "-2px");
-  await expect(body).toHaveCSS("mask-image", "none");
+  await expect(readingArea).toBeFocused();
   await page.keyboard.press("End");
-  await expect(body).not.toHaveAttribute("data-overflow-end");
+  await expect
+    .poll(() => readingArea.evaluate((element) => element.scrollTop))
+    .toBeGreaterThan(0);
   await page.keyboard.press("Tab");
   await expect(
     card.getByRole("button", { name: "Restore default" }),
   ).toBeFocused();
-  await expect(body).toHaveCSS("mask-image", "none");
 
   await publishing.press("Space");
   await expect(publishing).toHaveAttribute("aria-expanded", "false");
@@ -155,7 +150,7 @@ test("expanded Settings cards own adjacent borders and keep long text keyboard-s
 
   const standard = notes.getByRole("button", { name: "Working notes" });
   await standard.click();
-  const standardBody = notes.locator(".buzz-accordion-scroll");
-  await expect(standardBody).toHaveCSS("max-block-size", "320px");
-  await expect(standardBody).toHaveCSS("mask-image", "none");
+  await expect(
+    notes.getByText("Keep decisions next to the work they affect."),
+  ).toBeVisible();
 });

@@ -85,10 +85,7 @@ import { Switch } from "../../../../src/shared/design-system/ui/Switch";
 import { PreferenceRow } from "../../../../src/shared/design-system/ui/PreferenceRow";
 import { Select } from "../../../../src/shared/design-system/ui/Select";
 import { SwitchPreferenceRow } from "../../../../src/shared/design-system/ui/SwitchPreferenceRow";
-import {
-  Accordion,
-  AccordionScrollContent,
-} from "../../../../src/shared/design-system/ui/Accordion";
+import { Accordion } from "../../../../src/shared/design-system/ui/Accordion";
 
 import { Avatar } from "../../../../src/shared/design-system/ui/Avatar";
 import { AvatarStack } from "../../../../src/shared/design-system/ui/AvatarStack";
@@ -2734,9 +2731,15 @@ export const COMPONENT_SPECIMENS: Record<string, () => ReactNode> = {
         title: "Publishing",
         content: (
           <div className="grid gap-3">
-            <AccordionScrollContent>
-              <p>Publishing instructions go here.</p>
-            </AccordionScrollContent>
+            <div className="rounded-row border border-standard p-2">
+              <section
+                aria-label="Publishing instructions"
+                className="max-h-48 overflow-y-auto"
+                tabIndex={0}
+              >
+                <p>Publishing instructions go here.</p>
+              </section>
+            </div>
             <div>
               <Button size="sm" variant="outline">Restore default</Button>
             </div>
@@ -2770,8 +2773,13 @@ export const COMPONENT_SPECIMENS: Record<string, () => ReactNode> = {
                 triggerDescription: "Default instructions",
                 content: (
                   <div className="grid min-w-0 gap-3">
-                    <AccordionScrollContent>
-                      <div className="grid gap-4 text-body-sm">
+                    <div className="rounded-row border border-standard p-2">
+                      <section
+                        aria-label="Publishing instructions"
+                        // biome-ignore lint/a11y/noNoninteractiveTabindex: This caller supplies a keyboard-scrollable region.
+                        tabIndex={0}
+                        className="grid max-h-48 gap-4 overflow-y-auto text-body-sm"
+                      >
                         <p className="m-0">
                           Before sharing a document, identify the audience and
                           check who has access. Use the destination the
@@ -2803,8 +2811,8 @@ export const COMPONENT_SPECIMENS: Record<string, () => ReactNode> = {
                           it shows the expected version. Report the outcome
                           where the request was made.
                         </p>
-                      </div>
-                    </AccordionScrollContent>
+                      </section>
+                    </div>
                     <div>
                       <Button size="sm" variant="outline">
                         Restore default
@@ -2822,11 +2830,9 @@ export const COMPONENT_SPECIMENS: Record<string, () => ReactNode> = {
                 value: "Working notes",
                 title: "Working notes",
                 content: (
-                  <AccordionScrollContent>
-                    <p className="m-0 text-body-sm">
-                      Keep decisions next to the work they affect.
-                    </p>
-                  </AccordionScrollContent>
+                  <p className="m-0 text-body-sm">
+                    Keep decisions next to the work they affect.
+                  </p>
                 ),
               },
             ]}

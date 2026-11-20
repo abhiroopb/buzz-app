@@ -151,9 +151,8 @@ beyond its neighbors to give reading or editing content more room. The collapsed
 compact layout. The open card supplies the border between adjoining disclosure
 rows. Use it on its own or directly inside a row-layout SettingsGroup. In a
 SettingsGroup, leave space around the group for the card to extend into.
-Use `AccordionScrollContent` for a long panel body, with actions placed after
-the scroll area. Set `--accordion-content-max-height` on a shared parent to
-match the text limit to an editor.
+Callers supply the panel body and decide whether it scrolls. For a bounded
+reading area, provide a keyboard focus target and place actions below it.
 Standalone triggers use the settings container shape and spacing; the chevron
 is decorative, and the entire row expands the content. `Select variant="preference"` uses the same
 label and compact choice control without adding a group container.

@@ -2,25 +2,6 @@ import { Accordion as BaseAccordion } from "@base-ui/react/accordion";
 import { CaretDownIcon } from "../icons/index";
 import type { ReactNode } from "react";
 import { motion, useReducedMotion } from "motion/react";
-import { useScrollEdges } from "./useScrollEdges";
-
-/** A bounded reading area within a disclosure. Place actions after it. */
-export function AccordionScrollContent({ children }: { children: ReactNode }) {
-  const edges = useScrollEdges("block");
-  return (
-    <div className="buzz-accordion-scroll-frame">
-      <div
-        ref={edges}
-        className="buzz-accordion-scroll"
-        data-scroll-fade="end"
-        // biome-ignore lint/a11y/noNoninteractiveTabindex: Plain-text content needs a keyboard scroll target.
-        tabIndex={0}
-      >
-        <div>{children}</div>
-      </div>
-    </div>
-  );
-}
 
 /** Accessible disclosure groups. Base UI owns expansion and keyboard behavior. */
 export function Accordion({
