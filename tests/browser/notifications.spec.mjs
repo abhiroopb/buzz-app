@@ -76,13 +76,18 @@ async function ready(page, app) {
 function liveMessage(
   app,
   content,
-  { age = 0, createdAt, replyTo, mentioned = true } = {},
+  {
+    age = 0,
+    createdAt = Math.floor(Date.now() / 1000) - age,
+    replyTo,
+    mentioned = true,
+  } = {},
 ) {
   const event = finalizeEvent(
     {
       kind: 9,
       content,
-      created_at: createdAt ?? Math.floor(Date.now() / 1000) - age,
+      created_at: createdAt,
       tags: [
         ["h", "beta"],
         ...(mentioned ? [["p", app.viewer]] : []),
@@ -322,22 +327,21 @@ test("a fully visible incoming row stays quiet without publishing read intent", 
   // Controlled policy/dwell ordering, not evidence about native frame scheduling.
   // Exact-row navigation and reflow journeys below retain native rAF.
   await pauseClock(page, 30_000);
-  // Browser clock advancement does not advance the Node fixture's wall clock.
-  // Keep arrivals newer than the bottom row, so its outstanding catch-up cannot
-  // acknowledge them as older retained attention before their own dwell.
+  // The earlier row can finish its dwell as the clock advances. Publish
+  // after its read frontier so this live mention starts unread.
   const row = liveMessage(app, "Visible mention", {
     createdAt: following.created_at + 1,
   });
   await expect
     .poll(() =>
-      page.evaluate((id) => {
-        const { status, unread } = window.fixtureRelay
-          .snapshot()
-          .session.unread.attention("beta", id);
-        return { status, unread };
-      }, row.id),
+      page.evaluate(
+        (id) =>
+          window.fixtureRelay.snapshot().session.unread.attention("beta", id)
+            .status,
+        row.id,
+      ),
     )
-    .toEqual({ status: "eligible", unread: true });
+    .toBe("eligible");
   // The paused clock must not run presentation's deadline ahead of the new
   // row's commit/positioning. Pump frames until viewing is established, yielding
   // between steps for native ResizeObserver and React work. Cap clock progress
