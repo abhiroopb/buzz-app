@@ -66,7 +66,7 @@
     position: absolute;
     z-index: 2;
     inset-block-start: calc(-1 * var(--space-half));
-    inset-inline-end: 0;
+    inset-inline-end: var(--space-1);
     opacity: 0;
   }
 
@@ -94,11 +94,15 @@
       opacity: 1;
     }
 
-    /* Badges make room for the task action. */
+    /* The task action takes the place of the row's badges. */
     &:has(> .teamRowSlot > [data-solo-channel-new-task])
       > :first-child
       [data-channel-id] {
       padding-inline-end: var(--size-control-sm);
+
+      & [class~="navigation-item-trailing"] {
+        display: none;
+      }
     }
   }
 
