@@ -320,8 +320,8 @@ Add `"host"` to `inject`, then:
   `intro` supplies content at the start of history. It scrolls with the messages.
   `headerActions` renders in the main tab's toolbar, before the three-dot menu,
   when `ctx.conversation.workspaceSlots?.headerActions === true`; an older host
-  ignores it. Use compact icon controls with an `aria-label`, such as `ui.Button`
-  with `variant: "ghost"` and `size: "sm"`.
+  ignores it. Use compact icon buttons with an `aria-label` and `title`, and set
+  `aria-pressed` or `aria-expanded` on a toggle.
   `actions` supplies
   entries in the header's three-dot menu and the tab's context menu, with
   `{ label, run() }`. `detail: { target, rootId? }` initially selects a panel
