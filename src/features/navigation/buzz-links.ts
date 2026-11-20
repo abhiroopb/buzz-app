@@ -5,6 +5,7 @@ import {
 } from "../repos/routes";
 import { newMessageTarget } from "../channel-navigation/new-message-route";
 import {
+  isLinkDraft,
   parseGitPluginSource,
   parseUrlPluginSource,
   parseOpenTarget,
@@ -34,6 +35,8 @@ type BuzzLink =
       channelId: string;
       messageId?: string;
       threadRootId?: string;
+      /** Plain text for the opened composer when it is empty; never sent. */
+      draft?: string;
     };
 
 /** True for any `buzz:` scheme link, regardless of case. Classification must
@@ -243,7 +246,7 @@ export function parseBuzzLink(href: string): BuzzLink | null {
       return null;
     // A duplicated known key is ambiguous and still rejects.
     if (
-      ["channel", "id", "thread"].some(
+      ["channel", "id", "thread", "draft"].some(
         (key) => url.searchParams.getAll(key).length > 1,
       )
     )
@@ -251,10 +254,12 @@ export function parseBuzzLink(href: string): BuzzLink | null {
     const channelId = url.searchParams.get("channel") ?? "";
     const messageId = url.searchParams.get("id") ?? "";
     const threadRootId = url.searchParams.get("thread");
+    const draft = url.searchParams.get("draft");
     if (
       !channelPattern.test(channelId) ||
       !eventPattern.test(messageId) ||
-      (threadRootId !== null && !eventPattern.test(threadRootId))
+      (threadRootId !== null && !eventPattern.test(threadRootId)) ||
+      (draft !== null && !isLinkDraft(draft))
     )
       return null;
     return {
@@ -262,6 +267,7 @@ export function parseBuzzLink(href: string): BuzzLink | null {
       channelId,
       messageId: messageId.toLowerCase(),
       ...(threadRootId ? { threadRootId: threadRootId.toLowerCase() } : {}),
+      ...(draft !== null ? { draft } : {}),
     };
   } catch {
     return null;

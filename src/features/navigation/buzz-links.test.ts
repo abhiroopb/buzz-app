@@ -502,3 +502,38 @@ it("opens an agent card's link as Create agent on the Agents page in the receivi
   ])
     expect(parseBuzzLink(invalid), invalid).toBeNull();
 });
+it("carries a message link's draft as plain text for the conversation it opens", () => {
+  const thread = "b".repeat(64);
+  const href = `${example}&thread=${thread}&draft=Ship%20it%3F%0A%40team%09ok`;
+  expect(buzzLinkKind(href)).toBe("thread");
+  expect(buzzLinkTarget(href, scope)).toEqual({
+    version: 1,
+    kind: "conversation",
+    scope,
+    channelId: "c89a3185-29c5-40db-8284-054536d98b09",
+    messageId:
+      "9a77911a6e94147b1ce2cdb3c4e87046c67a29f29f3dd25626134621a5f6924b",
+    threadRootId: thread,
+    draft: "Ship it?\n@team\tok",
+  });
+  expect(parseBuzzLink(`${example}&draft=${"x".repeat(2000)}`)).toMatchObject({
+    draft: "x".repeat(2000),
+  });
+  // The channel forms carry everything in the path and still ignore a query.
+  expect(parseBuzzLink("buzz://channel/general?draft=hi")).toEqual({
+    format: "legacy",
+    channelId: "general",
+  });
+});
+it.each([
+  ["repeated", "draft=a&draft=b"],
+  ["empty", "draft="],
+  ["blank", "draft=%20%0A"],
+  ["over 2,000 characters", `draft=${"x".repeat(2001)}`],
+  ["a NUL", "draft=a%00b"],
+  ["an escape sequence", "draft=%1B%5B2J"],
+  ["a delete character", "draft=a%7Fb"],
+])("rejects a message link whose draft is %s", (_name, query) => {
+  expect(parseBuzzLink(`${example}&${query}`)).toBeNull();
+  expect(buzzLinkTarget(`${example}&${query}`, scope)).toBeNull();
+});

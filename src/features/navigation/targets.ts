@@ -89,6 +89,9 @@ export type OpenTarget = Readonly<{ join?: JoinPresentation }> &
         forward?: string;
         /** Read-only content selected beside this conversation; never an action. */
         detail?: Readonly<{ target: string; rootId?: string }>;
+        /** A link's plain text for the opened composer, used only while that
+         * composer holds no draft and never sent. The page retires it. */
+        draft?: string;
       }>
   );
 
@@ -103,6 +106,17 @@ const gitCommit = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/i;
 const MAX_PARAMS = 16;
 const MAX_PARAM_LENGTH = 1024;
 const invalid = () => new Error("Invalid or unsupported navigation target");
+const MAX_LINK_DRAFT = 2000;
+/** A link draft: 1-2,000 characters of plain text, tabs and line breaks
+ * included, with no other control characters. */
+export function isLinkDraft(value: string) {
+  return (
+    value.length <= MAX_LINK_DRAFT &&
+    // biome-ignore lint/suspicious/noControlCharactersInRegex: Rejecting them is the point.
+    /^[^\u0000-\u0008\u000b-\u001f\u007f]+$/u.test(value) &&
+    value.trim() !== ""
+  );
+}
 function record(value: unknown): Record<string, unknown> {
   if (
     !value ||
@@ -455,7 +469,13 @@ export function parseOpenTarget(input: unknown): OpenTarget {
           "panel",
           "forward",
           "detail",
+          "draft",
         ]);
+        if (
+          value.draft !== undefined &&
+          (typeof value.draft !== "string" || !isLinkDraft(value.draft))
+        )
+          throw invalid();
         if (value.threadRootId !== undefined && value.messageId === undefined)
           throw invalid();
         if (
@@ -501,6 +521,7 @@ export function parseOpenTarget(input: unknown): OpenTarget {
             ? { forward: text(value.forward, hex).toLowerCase() }
             : {}),
           ...(detail ? { detail } : {}),
+          ...(value.draft !== undefined ? { draft: value.draft } : {}),
         };
         break;
       }
