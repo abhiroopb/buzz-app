@@ -26,6 +26,7 @@ import { RegionDestinationContext } from "./SoloDestination";
 import { SoloDisclosure } from "./SoloDisclosure";
 import { SpringLoadedNavigationItem } from "./SpringLoadedNavigationItem";
 import { conversationTarget, matchesConversation } from "./routes";
+import rowStyles from "../../bundled/channels/SoloWorkspaces.module.css";
 import styles from "./RegionChannelGroup.module.css";
 
 const ChannelGroupsContext = createContext<ReadonlyMap<string, ChannelSummary>>(
@@ -240,7 +241,12 @@ export function RegionChannelGroup(props: SoloChannelGroupProps) {
           <>
             {disclosure}
             {newTaskButton}
-            <div className={styles.teamRowBody}>{body}</div>
+            {/* Rows read the region's sidebar measurements. */}
+            <div
+              className={`${styles.teamRowBody} ${rowStyles.sidebarContents}`}
+            >
+              {body}
+            </div>
           </>,
           teamRow.slot,
         )
