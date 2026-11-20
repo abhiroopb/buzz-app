@@ -207,7 +207,7 @@ test.describe("passive channel removal", () => {
         await expect(anchor).toBeInViewport({ ratio: 1 });
       } else {
         await expect(departing).toBeInViewport({ ratio: 1 });
-        await expect(heading).not.toBeInViewport({ ratio: 1 });
+        await expect.poll(() => heading.evaluate(unseen)).not.toBe("");
       }
       const scrollTop = await sidebar.evaluate((nav) => nav.scrollTop);
       if (removeSolo) {
@@ -235,7 +235,8 @@ test.describe("passive channel removal", () => {
           );
       } else {
         await expect(heading).toBeFocused();
-        await expect(heading).toBeInViewport({ ratio: 1 });
+        // Browser focus can align the heading to a fractional scroll pixel.
+        await expect.poll(() => heading.evaluate(unseen)).toBe("");
       }
     });
 });
