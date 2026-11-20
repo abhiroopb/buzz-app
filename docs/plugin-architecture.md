@@ -2926,13 +2926,16 @@ owner IDs in input order, including messages without explicit mentions. The
 host retains up to 4,096 confirmed IDs per viewer and community. An empty result
 means there is no positive proof for the candidates.
 
-The host records evidence from a human Send with explicit editor selections,
-then exposes it after relay acknowledgement or verified history readback.
-Automatic recipients leave the last explicit mention in place. Older messages
-and raw writes have unknown owner provenance. The bounded index is local to the
-running app and its viewer and community. It survives reconnect and session
-replacement. `null` means evidence or access is unavailable. This reader
-performs no relay queries and returns no message text.
+The host records evidence from a human Send through its built-in channel and
+thread composers, media review replies, new direct messages and Solo chats,
+and main-window Huddle composer. It exposes the evidence after relay
+acknowledgement or verified history readback. The detached Huddle composer
+uses a send proxy, so its sends have unknown provenance, as do older messages
+and raw writes. Automatic recipients leave the last explicit mention in place.
+The bounded index is local to the running app and its viewer and community.
+It survives a transient reconnect and session replacement. A community access
+refusal clears the retained evidence. `null` means evidence or access is
+unavailable. This reader performs no relay queries and returns no message text.
 
 For kind 30177 publication, follow the
 [managed-agent registration guidance](relay-queries.md#managed-agent-registration-kind-30177).

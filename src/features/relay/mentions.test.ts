@@ -170,6 +170,89 @@ afterEach(() => {
   for (const owner of owners.splice(0)) owner.dispose();
 });
 
+it("withholds owner proof while an open channel's metadata awaits revalidation after a disconnect", async () => {
+  const h = setup(false, true);
+  h.live().state({ status: "connected", routes: [] });
+  await h.members(
+    undefined,
+    1700000000,
+    relay,
+    metadata(relay, "c", "General", 1700000000, [["public"]]),
+  );
+  const source = { channelId: "c", rootId: null };
+  const { ownerMentions, channels, messages } = h.session;
+  assert(ownerMentions);
+  const id = sendWithOwnerMentions(h.session, [honey.pubkey], () =>
+    messages.send("c", "@Honey hello", [honey.pubkey]),
+  );
+  await vi.waitFor(() =>
+    expect(ownerMentions.latest(source)?.eventId).toBe(id),
+  );
+
+  h.live().receive([roster(relay, "c", [honey.pubkey], 1700000001)]);
+  const lookup = channels.resolve?.(["c"]);
+  const pendingLookup = () =>
+    h.pending.findIndex((entry) =>
+      entry.filters.some(
+        (filter) =>
+          filter.kinds?.includes(39000) && filter["#d"]?.includes("c"),
+      ),
+    );
+  await vi.waitFor(() => expect(pendingLookup()).not.toBe(-1));
+  h.pending
+    .splice(pendingLookup(), 1)[0]
+    .respond([metadata(relay, "c", "General", 1700000000, [["public"]])]);
+  await lookup;
+  expect(channels.get?.("c")?.viewerRole).toBeUndefined();
+  expect(channels.get?.("c")?.visibility).toBe("public");
+  expect(ownerMentions.confirmedOwnerSends(source, [id])).toEqual([id]);
+
+  h.live().state({ status: "retrying", routes: [] });
+  expect(channels.get?.("c")?.metadataCached).toBe(true);
+  expect(ownerMentions.latest(source)).toBeNull();
+  expect(ownerMentions.confirmedOwnerSends(source, [id])).toEqual([]);
+
+  h.live().state({ status: "connected", routes: [] });
+  h.live().receive([
+    metadata(relay, "c", "General", 1700000002, [["private"]]),
+  ]);
+  expect(channels.get?.("c")).toBeUndefined();
+  expect(ownerMentions.latest(source)).toBeNull();
+  expect(ownerMentions.confirmedOwnerSends(source, [id])).toEqual([]);
+});
+
+it("retains a send acknowledged during a disconnect until channel metadata is fresh", async () => {
+  const h = setup(false, true);
+  h.live().state({ status: "connected", routes: [] });
+  await h.members();
+  const { ownerMentions, channels, messages, outbox } = h.session;
+  assert(ownerMentions && outbox);
+  const source = { channelId: "c", rootId: null };
+  const acknowledgement = deferred<void>();
+  h.publish.mockReturnValueOnce(acknowledgement.promise);
+  const id = sendWithOwnerMentions(h.session, [honey.pubkey], () =>
+    messages.send("c", "@Honey hello", [honey.pubkey]),
+  );
+  try {
+    await vi.waitFor(() => expect(h.publish).toHaveBeenCalledOnce());
+    h.live().state({ status: "retrying", routes: [] });
+    expect(channels.get?.("c")?.metadataCached).toBe(true);
+  } finally {
+    acknowledgement.resolve();
+  }
+  await vi.waitFor(() =>
+    expect(outbox.snapshot()[0]?.delivery).toBe("accepted"),
+  );
+  expect(ownerMentions.latest(source)).toBeNull();
+  expect(ownerMentions.confirmedOwnerSends(source, [id])).toEqual([]);
+
+  h.live().state({ status: "connected", routes: [] });
+  h.live().receive([metadata(relay, "c", "General", 1700000002)]);
+  expect(channels.get?.("c")?.metadataCached).toBeUndefined();
+  expect(ownerMentions.latest(source)?.eventId).toBe(id);
+  expect(ownerMentions.confirmedOwnerSends(source, [id])).toEqual([id]);
+});
+
 it("advances owner mention evidence A to B to A only on confirmed human sends in the exact source", async () => {
   const h = setup(true, true);
   h.live().state({ status: "connected", routes: [] });

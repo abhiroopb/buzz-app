@@ -530,19 +530,27 @@ test("actual composer selects namesakes by exact key, publishes channel/reply ta
   await expect
     .poll(() => page.evaluate(() => window.mentionFixture.publications.length))
     .toBe(4);
-  expect(
-    await page.evaluate(() =>
-      window.mentionFixture.publications
-        .at(-1)
-        .tags.filter(([tag]) => tag === "p"),
-    ),
-  ).toEqual([["p", keys.second]]);
+  const automatic = await page.evaluate(() =>
+    window.mentionFixture.publications.at(-1),
+  );
+  expect(automatic.tags.filter(([tag]) => tag === "p")).toEqual([
+    ["p", keys.second],
+  ]);
+  const threadRoot = "a".repeat(64);
+  await expect
+    .poll(() =>
+      page.evaluate(
+        ({ root, id }) => window.mentionFixture.confirmedOwnerSends(root, [id]),
+        { root: threadRoot, id: automatic.id },
+      ),
+    )
+    .toEqual([automatic.id]);
   expect(
     await page.evaluate(
-      () => window.mentionFixture.ownerMention("a".repeat(64))?.eventId,
+      (root) => window.mentionFixture.ownerMention(root)?.eventId,
+      threadRoot,
     ),
   ).toBe(afterRemoval.id);
-  const threadRoot = "a".repeat(64);
   const ordinary = page.getByRole("textbox", { name: "Reply to thread" });
   await ordinary.fill("An ordinary owner update");
   await ordinary.press("Enter");

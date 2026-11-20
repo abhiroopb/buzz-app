@@ -390,7 +390,7 @@ export function createRelaySession(
               if (event.kind !== PRODUCT_FEEDBACK_KIND) confirm(event);
               // An `unknown` attempt waits for confirm() to read it back.
               if (acknowledged) {
-                ownerMentionStore?.confirm(event, canReadOwnerMentions);
+                ownerMentionStore?.confirm(event, canConfirmOwnerMentions);
                 acceptOwnActivity(event);
               }
             },
@@ -456,17 +456,24 @@ export function createRelaySession(
   }
   const canReadRemote = (id: string) =>
     !options.cachedOnly && canAccess(id) && !channels.queries.get?.(id)?.cached;
-  function canReadOwnerMentions(id: string) {
+  function canConfirmOwnerMentions(id: string) {
     if (closed || revoking || cacheClearing || options.cachedOnly) return false;
     const channel = channels.queries.get?.(id);
     // The general history gate admits unknown channels during discovery.
-    // Retained private provenance needs current, positive source access.
+    // Only confirmed sends in a known channel can become evidence.
     return (
       !!channel &&
       !channel.cached &&
       !channel.pending &&
       !channel.metadataPending &&
       canAccess(id)
+    );
+  }
+  function canReadOwnerMentions(id: string) {
+    // HTTP can confirm a send during a socket drop. Keep that receipt locally
+    // and withhold it until fresh channel metadata confirms read access.
+    return (
+      canConfirmOwnerMentions(id) && !channels.queries.get?.(id)?.metadataCached
     );
   }
   function visibility(events: readonly EventData[] = [], remote = false) {
@@ -968,7 +975,7 @@ export function createRelaySession(
       events[0]?.id ?? "empty",
       () => {
         for (const event of visible) {
-          ownerMentionStore?.confirm(event, canReadOwnerMentions);
+          ownerMentionStore?.confirm(event, canConfirmOwnerMentions);
           const previous = recent.peek(event.id);
           // Replay can precede a fresh live copy. Keep alert receipt separate from content receipt.
           const incoming = [9, 40002, 40008].includes(event.kind)

@@ -283,7 +283,10 @@ export function provideRelay(
       !signal.aborted &&
       current === generation &&
       signal === controller?.signal;
+    if (!live()) return;
     if (kind !== "sign-in") {
+      // A reconnect may already have replaced the session with an empty one.
+      ownerMentionStore?.clear();
       await store.clearCache();
       if (resume) {
         const disk = createHeadPersistence(resume.viewer, resume.scope);
