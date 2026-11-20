@@ -78,7 +78,7 @@ import {
   wakeLands,
 } from "../../features/agent-harness/plugin-wake";
 import type { ClaudeModel, Settled, Spawn, ToolServer } from "./claude";
-import { appClient, readFile } from "../../buzz-mcp/app-client";
+import { appClient, readFile, relayKeyOf } from "../../buzz-mcp/app-client";
 import {
   MemoryReads,
   READ_TIMEOUT_MS,
@@ -2166,7 +2166,7 @@ export class ClaudeRuntime {
               return entry.sessions.captureProtectionContext(conversation);
             },
             relayAuthor: this.reads(agent)?.relayAuthor?.(),
-            signingAuthority: this.reads(agent)?.workflowAuthority(),
+            signingAuthority: relayKeyOf(this.reads(agent)),
             read: (path) =>
               this.target
                 ? this.target.readFile(path, { cwd })
