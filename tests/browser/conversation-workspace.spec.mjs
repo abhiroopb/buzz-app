@@ -44,9 +44,18 @@ async function expectBottom(page, region) {
 
 async function readEarlier(page, region) {
   await region.hover();
-  await wheel(page, -450, region);
-  await expect.poll(() => gap(region)).toBeGreaterThan(200);
-  await settle(page, region);
+  let distance = await gap(region);
+  // Linux WebKit can finish a wheel gesture before reaching the requested distance.
+  for (let gesture = 0; gesture < 4; gesture++) {
+    await wheel(page, -450, region);
+    const next = await gap(region);
+    expect(next, "reading gesture moves away from bottom").toBeGreaterThan(
+      distance,
+    );
+    distance = next;
+    if (distance > 200) break;
+  }
+  expect(distance).toBeGreaterThan(200);
 }
 
 async function openReplyTab(app, region) {
