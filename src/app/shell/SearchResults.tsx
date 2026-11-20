@@ -185,6 +185,11 @@ const noMembers: readonly string[] = [];
 const isSearchAction = (key: string) =>
   key === "more-messages" || key === "ask";
 
+/** The viewer is in this conversation now: a saved row or a guest's read-only
+ * one counts; a public channel read after leaving does not. */
+const joined = (channel: ChannelSummary) =>
+  !channel.readOnly || !!channel.cached || channel.viewerRole === "guest";
+
 function useDelayedSearch(pending: boolean) {
   const [slow, setSlow] = useState(false);
   const shown = useRef(false);
@@ -1641,11 +1646,7 @@ export function SearchResults({
   const suggestions = channels
     .filter(
       (channel) =>
-        (!channel.readOnly ||
-          channel.cached ||
-          channel.viewerRole === "guest") &&
-        !channel.archived &&
-        !sidebarHidden(channel),
+        joined(channel) && !channel.archived && !sidebarHidden(channel),
     )
     .sort(
       (a, b) =>
@@ -1869,13 +1870,7 @@ export function SearchResults({
           !!message.agentEnvelope ||
           !!profiles.get(message.authorId)?.isAgent ||
           knownAgents.has(message.authorId),
-        // Currently joined, as the joined-channel suggestions read it: a
-        // roster kept after leaving doesn't count.
-        member:
-          !!channel &&
-          (!channel.readOnly ||
-            !!channel.cached ||
-            channel.viewerRole === "guest"),
+        member: !!channel && joined(channel),
       };
     },
     held: movedFor === searchKey,
