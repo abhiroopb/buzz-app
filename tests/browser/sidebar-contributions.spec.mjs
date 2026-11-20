@@ -366,6 +366,12 @@ appTest.describe("sidebar refresh", () => {
         '[data-sidebar-section^="solo-region:"] [data-solo-destination-id]';
       const rows = viewport.locator(rowSelector);
       await expect(rows).toHaveCount(soloChannels.length);
+      // Finish moving the original Solo rows before measuring the anchor.
+      await expect(
+        viewport.locator(
+          '[data-sidebar-section="solo"] [data-solo-destination-id]',
+        ),
+      ).toHaveCount(0);
       // A contributed task can have a compact link inside its full-width row.
       await rows.evaluateAll((links) => {
         for (const link of links)
