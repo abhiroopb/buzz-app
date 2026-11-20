@@ -2691,7 +2691,7 @@ function ChannelWorkspace({
                 body
               ) : (
                 <div className={styles.mainWorkspace}>
-                  {/* A floating dock covers these tabs without hiding them. */}
+                  {/* A floating dock covers these tabs but keeps them mounted, so they count as hidden. */}
                   <PaneShownScope shown={!covered}>
                     <PanelWorkspace
                       main
