@@ -104,6 +104,9 @@ export function createIdentityArchives(
   let closed = false;
   let controller: AbortController | undefined;
   let pending: Promise<void> | undefined;
+  // Whether a consumer read the snapshot since the last clear; only then does
+  // a reconnect read it again.
+  let demanded = false;
   // Keep only the ordering fence across cache clears; never revive old contents.
   // This is session-local rollback resistance, not a cross-device durable fence.
   let head: Pick<RelayEvent, "id" | "created_at"> | undefined;
@@ -117,6 +120,7 @@ export function createIdentityArchives(
   }
   function refresh(): Promise<void> {
     if (closed || !available || !authority) return Promise.resolve();
+    demanded = true;
     if (pending) return pending;
     const owned = new AbortController();
     controller = owned;
@@ -322,7 +326,27 @@ export function createIdentityArchives(
     }
     // A read started before acceptance cannot confirm it; a failed re-read stays unknown.
     await pending;
-    await refresh();
+    const confirming = refresh();
+    await confirming;
+    // A reconnect restarts that read; within this request's deadline, wait
+    // for the read that replaced it.
+    if (snapshot.status === "loading" && pending && pending !== confirming) {
+      let read = confirming;
+      const deadline = new Promise<void>((resolve) => {
+        if (signal.aborted) resolve();
+        signal.addEventListener("abort", () => resolve(), { once: true });
+      });
+      while (
+        !closed &&
+        !signal.aborted &&
+        snapshot.status === "loading" &&
+        pending &&
+        pending !== read
+      ) {
+        read = pending;
+        await Promise.race([read, deadline]);
+      }
+    }
     if (closed) throw new Error("Archive request was interrupted");
     const expected = action === "archive" ? "archived" : "not-archived";
     if (state(target) !== expected)
@@ -345,6 +369,7 @@ export function createIdentityArchives(
   }
   /** Forgets everything known, for a new identity or access. */
   function clear() {
+    demanded = false;
     publish({ status: stop(), archived: empty });
   }
   /** After a reconnect: the next ensure() rereads, and until it replaces them
@@ -356,11 +381,11 @@ export function createIdentityArchives(
   /** Once a dropped connection is back: a snapshot that a view subscribes to
    * is read again, since a change during the drop would otherwise wait for
    * that view's next opening. A read still retrying from the drop starts
-   * over. At most one snapshot read per session with a subscribed view,
-   * beside the session's other reconnect repairs; the drop already left most
-   * snapshots stale, so only one read during the drop adds a read. */
+   * over. Only a session whose consumers read the snapshot since the last
+   * clear reads it again, so startup stays lazy: at most one snapshot read per
+   * reconnect, beside the session's other reconnect repairs. */
   function reconnect() {
-    if (closed || !listeners.size) return;
+    if (closed || !demanded || !listeners.size) return;
     if (snapshot.status === "loading") {
       controller?.abort();
       controller = undefined;

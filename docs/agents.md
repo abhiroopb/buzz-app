@@ -1344,7 +1344,10 @@ Each profile opening rereads the snapshot, and so does showing a retained
 profile tab again: selecting its tab, opening its collapsed dock, closing the
 dock that covered it, or returning to the Agents tab that keeps it. A hidden
 tab reads nothing. After a dropped connection is established again, the store
-rereads the snapshot once for the views it serves. A failed reread keeps the
+rereads the snapshot once, if a consumer read it since the last access change;
+a session that never needed archive data reads nothing at startup or
+reconnect. A request whose confirming read a reconnect restarts confirms from
+the restarted read, within the request's deadline. A failed reread keeps the
 last known notice and link, as every archive surface keeps its last snapshot.
 The replacement is presentation, never access or proof.
 
