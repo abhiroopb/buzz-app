@@ -174,6 +174,29 @@ and mutation owners. Groups reuse the local roster and closed menus start no
 relay reads. The component does not discover channels, file tasks, or change their
 audience. Keep the previous presentation as a fallback when the component is absent.
 
+### Showing a group with its Team row
+
+Check `handle.teamRowChannelGroups === true` before relying on
+`placement: "team-row"`; older hosts ignore the prop and render the group in the
+region. With it, the channel's own Team sidebar row is the heading and keeps its
+selection, unread state, menus, dragging and focus, so `selected` and `onSelect`
+are unused. The host adds the disclosure and the New task action beside that row
+and the group's content beneath it, under the same access rules. Content stays
+mounted while collapsed.
+
+The group shows only while that Team row is mounted. A collapsed Team section,
+a restricted sidebar or a row hidden by a `sidebarRows` contribution shows
+nothing, and the content unmounts. Row contributions receive the row and its
+group as one `Default` element. Channels that fail the checks above still render
+nothing, so keep the source's own presentation for them. When several groups ask
+for one channel, the first mounted takes the row and the others render in the
+region until it leaves.
+
+Content keeps the region's React context and event bubbling, but its DOM sits
+in the Team section: styles and DOM queries scoped to the region do not reach it.
+Adding or removing the placement remounts the Team row, which can reset its
+focus or an open menu.
+
 ## Personal workspaces
 
 A source with `composeWorkspaces: true` receives optional `ui.Workspace`,

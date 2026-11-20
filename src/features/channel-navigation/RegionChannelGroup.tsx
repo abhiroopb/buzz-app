@@ -1,11 +1,15 @@
 import {
   createContext,
+  useCallback,
   useContext,
+  useLayoutEffect,
   useMemo,
   useRef,
+  useState,
   useSyncExternalStore,
   type ReactNode,
 } from "react";
+import { createPortal } from "react-dom";
 import { ChannelHeaderMenu } from "../../bundled/channels/ChannelHeaderMenu";
 import { canStartLinkedChat } from "../../bundled/channels/StartLinkedChat";
 import { channelTabs } from "../../bundled/channels/useChannelTabState";
@@ -50,6 +54,103 @@ export function RegionChannelGroups({
   );
 }
 
+type TeamRowGroup = Readonly<{
+  owner: object | undefined;
+  slot: HTMLElement | undefined;
+}>;
+const teamRowStores = new WeakMap<
+  RelaySession,
+  ReturnType<typeof createTeamRowGroups>
+>();
+
+/** Which group holds each channel's Team row, and where that row shows it. */
+function createTeamRowGroups() {
+  const entries = new Map<string, { owners: object[]; slots: HTMLElement[] }>();
+  const snapshots = new Map<string, TeamRowGroup>();
+  const listeners = new Map<string, Set<() => void>>();
+  const publish = (id: string) => {
+    const entry = entries.get(id);
+    if (entry && entry.owners.length + entry.slots.length)
+      // The first group keeps the row; the newest mounted row shows it.
+      snapshots.set(id, { owner: entry.owners[0], slot: entry.slots.at(-1) });
+    else {
+      entries.delete(id);
+      snapshots.delete(id);
+    }
+    for (const listener of [...(listeners.get(id) ?? [])]) listener();
+  };
+  const hold = <T,>(id: string, key: "owners" | "slots", item: T) => {
+    const entry = entries.get(id) ?? { owners: [], slots: [] };
+    entries.set(id, entry);
+    (entry[key] as T[]).push(item);
+    publish(id);
+    return () => {
+      const items = entries.get(id)?.[key] as T[] | undefined;
+      const index = items?.indexOf(item) ?? -1;
+      if (index < 0) return;
+      items?.splice(index, 1);
+      publish(id);
+    };
+  };
+  return {
+    get: (id: string) => snapshots.get(id),
+    subscribe(id: string, listener: () => void) {
+      const set = listeners.get(id) ?? new Set();
+      listeners.set(id, set.add(listener));
+      return () => {
+        set.delete(listener);
+        if (!set.size) listeners.delete(id);
+      };
+    },
+    claim: (id: string, owner: object) => hold(id, "owners", owner),
+    show: (id: string, slot: HTMLElement) => hold(id, "slots", slot),
+  };
+}
+
+function teamRowGroups(session: RelaySession) {
+  let store = teamRowStores.get(session);
+  if (!store) {
+    store = createTeamRowGroups();
+    teamRowStores.set(session, store);
+  }
+  return store;
+}
+
+function useTeamRowGroup(session: RelaySession | undefined, channelId: string) {
+  const store = session && teamRowGroups(session);
+  const subscribe = useCallback(
+    (listener: () => void) =>
+      store?.subscribe(channelId, listener) ?? (() => {}),
+    [store, channelId],
+  );
+  const snapshot = () => store?.get(channelId);
+  return [useSyncExternalStore(subscribe, snapshot, snapshot), store] as const;
+}
+
+/** Frames a Team channel row with the region group that asked for its place. */
+export function TeamRowChannelGroup({
+  session,
+  channelId,
+  children,
+}: {
+  session: RelaySession;
+  channelId: string;
+  children: ReactNode;
+}) {
+  const [group, store] = useTeamRowGroup(session, channelId);
+  const slot = useCallback(
+    (node: HTMLDivElement) => store?.show(channelId, node),
+    [store, channelId],
+  );
+  if (!group?.owner) return children;
+  return (
+    <div className={styles.teamRow} data-team-row-channel-group={channelId}>
+      {children}
+      <div ref={slot} className={styles.teamRowSlot} />
+    </div>
+  );
+}
+
 export function RegionChannelGroup(props: SoloChannelGroupProps) {
   const context = useContext(RegionDestinationContext);
   const channels = useContext(ChannelGroupsContext);
@@ -63,7 +164,17 @@ export function RegionChannelGroup(props: SoloChannelGroupProps) {
       (item.channelType === "stream" || item.channelType === "forum") &&
       item.members?.includes(context.session.viewer)
     );
-  if (!context || !eligible(channel) || !channel) return null;
+  const shown = !!context && eligible(channel);
+  const [owner] = useState(() => ({}));
+  const [teamRow, teamRows] = useTeamRowGroup(
+    shown && props.placement === "team-row" ? context.session : undefined,
+    props.channelId,
+  );
+  useLayoutEffect(
+    () => teamRows?.claim(props.channelId, owner),
+    [teamRows, props.channelId, owner],
+  );
+  if (!context || !shown || !channel) return null;
   const { session, navigator, scope, active } = context;
   const current = () =>
     session.channels
@@ -84,7 +195,16 @@ export function RegionChannelGroup(props: SoloChannelGroupProps) {
             props.onNewTask?.();
         }
       : undefined;
-  const Icon = channelIcon(channel);
+  const newTaskButton = newTask && (
+    <IconButton
+      size="compact"
+      data-solo-channel-new-task=""
+      aria-label={`New task in ${channel.name}`}
+      title="New task"
+      icon={<PencilSimpleIcon size={15} />}
+      onClick={newTask}
+    />
+  );
   const leading = props.headerLeading;
   const activateLeading = () => {
     if (eligible(current())) leading?.onActivate();
@@ -108,6 +228,24 @@ export function RegionChannelGroup(props: SoloChannelGroupProps) {
   const select = () => {
     if (eligible(current())) props.onSelect();
   };
+  const body = (
+    <div id={props.controls} hidden={!props.expanded}>
+      {props.children}
+    </div>
+  );
+  // A second group asking for the same row renders in place.
+  if (teamRows && (!teamRow?.owner || teamRow.owner === owner))
+    return teamRow?.slot
+      ? createPortal(
+          <>
+            {disclosure}
+            {newTaskButton}
+            <div className={styles.teamRowBody}>{body}</div>
+          </>,
+          teamRow.slot,
+        )
+      : null;
+  const Icon = channelIcon(channel);
   const openDetails = async () => {
     if (!eligible(current())) return;
     const opening = navigator.open(conversationTarget(scope, channel.id), {
@@ -127,14 +265,7 @@ export function RegionChannelGroup(props: SoloChannelGroupProps) {
   };
   return (
     <div className={styles.group} data-solo-channel-group={channel.id}>
-      <NavigationCard
-        tone="tonal"
-        body={
-          <div id={props.controls} hidden={!props.expanded}>
-            {props.children}
-          </div>
-        }
-      >
+      <NavigationCard tone="tonal" body={body}>
         <NavigationSectionHeading
           disclosure
           revealActions
@@ -146,16 +277,7 @@ export function RegionChannelGroup(props: SoloChannelGroupProps) {
           }}
           actions={
             <>
-              {newTask && (
-                <IconButton
-                  size="compact"
-                  data-solo-channel-new-task=""
-                  aria-label={`New task in ${channel.name}`}
-                  title="New task"
-                  icon={<PencilSimpleIcon size={15} />}
-                  onClick={newTask}
-                />
-              )}
+              {newTaskButton}
               <ChannelHeaderMenu
                 channel={channel}
                 session={session}

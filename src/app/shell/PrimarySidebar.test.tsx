@@ -11,6 +11,8 @@ import {
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it, vi } from "vitest";
+import { useState } from "react";
+import type { SoloRegionProps } from "../../features/channel-navigation/solo-navigation-contract";
 import { stubAvatarBrowserApis } from "../../features/agents/avatar-testing";
 import { readView, writeView } from "../../shared/view-state";
 import {
@@ -871,6 +873,124 @@ it("omits a contributed create action whose menu fails", async () => {
     expect(
       screen.queryByRole("button", { name: "Create" }),
     ).not.toBeInTheDocument();
+  } finally {
+    view.unmount();
+    await h.dispose();
+  }
+});
+
+it("shows a region channel group with its Team row", async () => {
+  const h = createSoloRegionFixture(viewer);
+  h.session.channelWrites = { ...h.session.channelWrites, available: true };
+  h.roster(
+    [
+      ...h.session.channels.list().channels,
+      {
+        id: "source",
+        name: "Source",
+        channelType: "stream",
+        members: [viewer],
+      },
+    ],
+    "ready",
+  );
+  const create = vi.fn();
+  function Body({ ui }: SoloRegionProps) {
+    const [expanded, setExpanded] = useState(true);
+    const [inline, setInline] = useState(true);
+    const Group = ui.ChannelGroup;
+    if (!Group) return null;
+    return (
+      <>
+        <button type="button" onClick={() => setInline(!inline)}>
+          Move tasks
+        </button>
+        <Group
+          channelId="source"
+          onSelect={() => {}}
+          expanded={expanded}
+          controls="source-tasks"
+          disclosureLabel="Toggle Source tasks"
+          onToggle={() => setExpanded(!expanded)}
+          onNewTask={create}
+          {...(inline ? { placement: "team-row" as const } : {})}
+        >
+          <input aria-label="Task draft" />
+        </Group>
+      </>
+    );
+  }
+  const source = await h.register({ title: "Nexus", component: Body });
+  expect(source.handle.teamRowChannelGroups).toBe(true);
+  const view = render(
+    <ToastProvider>
+      <PrimarySidebar
+        relay={h.relay}
+        navigator={h.navigator}
+        target={conversationTarget(h.scope, "chat")}
+      >
+        {null}
+      </PrimarySidebar>
+    </ToastProvider>,
+  );
+  const user = userEvent.setup();
+  try {
+    const group = () =>
+      view.container.querySelector('[data-team-row-channel-group="source"]');
+    const row = () =>
+      view.container.querySelector('button[data-channel-id="source"]');
+    const draft = await screen.findByRole(
+      "textbox",
+      { name: "Task draft" },
+      { timeout: SIDEBAR_REVEAL_BUDGET_MS * 2 },
+    );
+    // The Team row stays the only heading; the region shows no second one.
+    expect(group()).toContainElement(row() as HTMLElement);
+    expect(group()).toContainElement(draft);
+    expect(
+      view.container.querySelectorAll("[data-solo-channel-group]"),
+    ).toHaveLength(0);
+    expect(screen.getAllByText("Source")).toHaveLength(1);
+    const disclosure = screen.getByRole("button", {
+      name: "Toggle Source tasks",
+    });
+    await user.click(disclosure);
+    expect(disclosure).toHaveAttribute("aria-expanded", "false");
+    expect(draft).toBeInTheDocument();
+    expect(draft).not.toBeVisible();
+    await user.click(disclosure);
+    await user.click(
+      screen.getByRole("button", { name: "New task in Source" }),
+    );
+    expect(create).toHaveBeenCalledOnce();
+
+    // Without the placement the group returns to the region and the row to its plain form.
+    await user.click(screen.getByRole("button", { name: "Move tasks" }));
+    expect(group()).toBeNull();
+    expect(row()).toBeInTheDocument();
+    expect(
+      view.container.querySelector('[data-solo-channel-group="source"]'),
+    ).toContainElement(screen.getByRole("textbox", { name: "Task draft" }));
+    await user.click(screen.getByRole("button", { name: "Move tasks" }));
+    expect(group()).toContainElement(
+      screen.getByRole("textbox", { name: "Task draft" }),
+    );
+
+    // A group without its Team row shows nothing, in either place.
+    await act(() =>
+      h.roster(
+        h.session.channels
+          .list()
+          .channels.map((channel) =>
+            channel.id === "source" ? { ...channel, members: [] } : channel,
+          ),
+        "ready",
+      ),
+    );
+    expect(
+      screen.queryByRole("textbox", { name: "Task draft" }),
+    ).not.toBeInTheDocument();
+    expect(group()).toBeNull();
   } finally {
     view.unmount();
     await h.dispose();

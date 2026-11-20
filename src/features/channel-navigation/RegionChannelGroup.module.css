@@ -37,3 +37,34 @@
   min-width: 0;
   padding-inline-end: var(--space-half);
 }
+
+/* A Team row heads its group: the row, its disclosure and task action share a
+   line, with the group's content beneath. */
+.teamRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: start;
+}
+
+.teamRowSlot {
+  display: contents;
+}
+
+.teamRowBody {
+  grid-column: 1 / -1;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .teamRow [data-solo-channel-new-task] {
+    opacity: 0;
+  }
+
+  .teamRow:has(
+      > :first-child:hover,
+      > .teamRowSlot > :not(.teamRowBody):hover,
+      :focus-visible
+    )
+    [data-solo-channel-new-task] {
+    opacity: 1;
+  }
+}

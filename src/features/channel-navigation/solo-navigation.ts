@@ -577,6 +577,7 @@ export class SoloNavigationService extends Service implements SoloNavigation {
     return Object.freeze({
       label,
       draftContext: true,
+      teamRowChannelGroups: true,
       state(binding) {
         current(binding);
         const registered = host
