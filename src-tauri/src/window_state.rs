@@ -1,4 +1,4 @@
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use tauri::{LogicalSize, Manager, PhysicalPosition, PhysicalRect, PhysicalSize, Runtime, Window};
 use tauri_plugin_window_state::{AppHandleExt, Builder, StateFlags, WindowExt};
@@ -20,6 +20,10 @@ pub(crate) fn builder() -> Builder {
 
 // Called from app setup, after the configured main window has been created.
 const INTRO_GEOMETRY: &str = "onboarding-window-restore.json";
+// The plugin saves physical pixels without the scale they were measured at.
+// Buzz records it beside each save, as {"main": {"scale": 2.0}}.
+const SCALE: &str = ".window-scale.json";
+const INTRO_SCALE: &str = "onboarding-window-scale.json";
 
 /// Preserve normal geometry for the next launch, without resizing this session.
 #[tauri::command]
@@ -48,8 +52,50 @@ pub(crate) fn onboarding_preserve_window<R: Runtime>(
         StateFlags::SIZE | StateFlags::POSITION | StateFlags::MAXIMIZED | StateFlags::FULLSCREEN,
     )
     .map_err(|e| e.to_string())?;
+    let window = window.as_ref().window();
+    save_scale(&window);
     let bytes = std::fs::read(dir.join(app.filename())).map_err(|e| e.to_string())?;
-    preserve_intro_geometry(&target, &bytes)
+    preserve_intro_geometry(&target, &bytes)?;
+    if let Err(error) = write_scale(&window, INTRO_SCALE) {
+        eprintln!("Could not save Buzz window scale: {error}");
+    }
+    Ok(())
+}
+
+/// Record the main window's scale beside the plugin's save of its geometry.
+/// Call wherever the plugin saves, while the window still exists.
+pub(crate) fn save_scale<R: Runtime>(window: &Window<R>) {
+    if window.label() == "main" {
+        if let Err(error) = write_scale(window, SCALE) {
+            eprintln!("Could not save Buzz window scale: {error}");
+        }
+    }
+}
+
+fn write_scale<R: Runtime>(window: &Window<R>, name: &str) -> tauri::Result<()> {
+    let dir = window.app_handle().path().app_config_dir()?;
+    let scale = HashMap::from([(
+        window.label(),
+        SavedScale {
+            scale: window.scale_factor()?,
+        },
+    )]);
+    std::fs::create_dir_all(&dir)?;
+    std::fs::write(dir.join(name), serde_json::to_vec(&scale)?)?;
+    Ok(())
+}
+
+#[derive(Serialize, Deserialize)]
+struct SavedScale {
+    scale: f64,
+}
+
+fn saved_scale(bytes: &[u8], label: &str) -> Option<f64> {
+    serde_json::from_slice::<HashMap<String, SavedScale>>(bytes)
+        .ok()?
+        .remove(label)
+        .map(|saved| saved.scale)
+        .filter(|scale| scale.is_finite() && *scale > 0.0)
 }
 
 /// The Mac window shows `--bg-app` (tokens.css) under the page instead of the
@@ -94,21 +140,19 @@ fn preserve_intro_geometry(target: &std::path::Path, bytes: &[u8]) -> Result<(),
 }
 
 pub(crate) fn restore<R: Runtime>(window: &Window<R>) -> tauri::Result<()> {
-    let pending = window
-        .app_handle()
-        .path()
-        .app_config_dir()?
-        .join(INTRO_GEOMETRY);
+    let dir = window.app_handle().path().app_config_dir()?;
+    let pending = dir.join(INTRO_GEOMETRY);
     if let Ok(bytes) = std::fs::read(&pending) {
         if let Some(saved) = saved_geometry(&bytes, window.label()) {
             window.set_fullscreen(false)?;
             window.unmaximize()?;
-            restore_geometry_from(window, Some(bytes))?;
+            restore_geometry_from(window, Some(bytes), dir.join(INTRO_SCALE))?;
             window.set_fullscreen(saved.fullscreen)?;
             if saved.maximized {
                 window.maximize()?;
             }
             std::fs::remove_file(pending)?;
+            let _ = std::fs::remove_file(dir.join(INTRO_SCALE));
             return Ok(());
         }
     }
@@ -147,12 +191,14 @@ fn saved_geometry(bytes: &[u8], label: &str) -> Option<SavedGeometry> {
 }
 
 fn restore_geometry<R: Runtime>(window: &Window<R>) -> tauri::Result<()> {
-    restore_geometry_from(window, None)
+    let dir = window.app_handle().path().app_config_dir()?;
+    restore_geometry_from(window, None, dir.join(SCALE))
 }
 
 fn restore_geometry_from<R: Runtime>(
     window: &Window<R>,
     override_bytes: Option<Vec<u8>>,
+    scale_path: std::path::PathBuf,
 ) -> tauri::Result<()> {
     let path = window
         .app_handle()
@@ -165,10 +211,15 @@ fn restore_geometry_from<R: Runtime>(
     else {
         return Ok(());
     };
+    // Windows rescales on DPI change, so it keeps sending physical pixels.
+    let recorded = std::fs::read(scale_path)
+        .ok()
+        .and_then(|bytes| saved_scale(&bytes, window.label()))
+        .filter(|_| cfg!(not(windows)));
     let monitors = window.available_monitors()?;
     let areas: Vec<_> = monitors
         .iter()
-        .map(|monitor| *monitor.work_area())
+        .map(|monitor| (*monitor.work_area(), monitor.scale_factor()))
         .collect();
     let fallback = window
         .primary_monitor()?
@@ -183,17 +234,16 @@ fn restore_geometry_from<R: Runtime>(
             inner.x.saturating_sub(outer.x),
             inner.y.saturating_sub(outer.y),
         );
-        // AppShell owns a 48 logical-pixel header on all desktop platforms.
-        let header_height = (48.0 * window.scale_factor()?).ceil() as u32;
         let windows = &window.config().app.windows;
         let config = windows.first().cloned().unwrap_or_default();
-        let (position, size, relocated) =
-            restore_request(&saved, offset, header_height, &areas, fallback, &config);
+        let startup = window.scale_factor()?;
+        let (position, size, logical) =
+            restore_request(&saved, recorded, offset, startup, &areas, fallback, &config);
         // Validate the requested geometry BEFORE sending it. Native setters
         // may apply asynchronously (Linux/macOS); getters can still report the
         // startup frame.
         // Move first: Windows rescales on DPI change. macOS/GTK convert at the startup scale.
-        if let Some(scale) = relocated.filter(|_| cfg!(not(windows))) {
+        if let Some(scale) = logical.filter(|_| cfg!(not(windows))) {
             window.set_position(position.to_logical::<f64>(scale))?;
             return window.set_size(size.to_logical::<f64>(scale));
         }
@@ -203,14 +253,33 @@ fn restore_geometry_from<R: Runtime>(
     Ok(())
 }
 
+/// Plans the restore in the saved rect's pixels. With the recorded save-time
+/// scale, monitors are measured in those pixels too, and the result is sent as
+/// logical units at that scale. Without it, the plan is in mixed units, as before.
 fn restore_request(
     saved: &SavedGeometry,
+    recorded: Option<f64>,
     client_offset: PhysicalPosition<i32>,
-    header_height: u32,
-    areas: &[PhysicalRect<i32, u32>],
+    startup: f64,
+    monitors: &[(PhysicalRect<i32, u32>, f64)],
     (fallback, scale): (PhysicalRect<i32, u32>, f64),
     config: &tauri::utils::config::WindowConfig,
 ) -> (PhysicalPosition<i32>, PhysicalSize<u32>, Option<f64>) {
+    let rebase = |(area, from): (PhysicalRect<i32, u32>, f64)| match recorded {
+        Some(to) => PhysicalRect {
+            position: area.position.to_logical::<f64>(from).to_physical(to),
+            size: area.size.to_logical::<f64>(from).to_physical(to),
+        },
+        None => area,
+    };
+    let areas: Vec<_> = monitors.iter().copied().map(rebase).collect();
+    let fallback = rebase((fallback, scale));
+    let client_offset = match recorded {
+        Some(to) => client_offset.to_logical::<f64>(startup).to_physical(to),
+        None => client_offset,
+    };
+    // AppShell owns a 48 logical-pixel header on all desktop platforms.
+    let header_height = (48.0 * recorded.unwrap_or(startup)).ceil() as u32;
     let position = if saved.maximized {
         PhysicalPosition::new(saved.prev_x, saved.prev_y)
     } else {
@@ -223,17 +292,19 @@ fn restore_request(
         ),
         size: PhysicalSize::new(saved.width, saved.height),
     };
-    // A size below the minimum at the fallback's scale (rounded as tao rounds it) was
-    // saved at a lower scale and would reopen below it. Windows applies the minimum to
-    // the frame: take off tao's shadow insets (default metrics, Windows 11 top).
+    // Without a recorded scale, a size below the minimum at the fallback's scale (rounded
+    // as tao rounds it) was saved at a lower scale and would reopen below it. Windows
+    // applies the minimum to the frame: take off tao's shadow insets (default metrics,
+    // Windows 11 top).
     let win = u32::from(cfg!(windows));
     let side = win * (4 * (scale * 96.0).round() as u32 + 48) / 96 * 2;
     let top = win * scale.round() as u32;
     let px = |logical: Option<f64>| (logical.unwrap_or(0.0) * scale).round() as u32;
-    let below = saved.width < px(config.min_width).saturating_sub(2 * side)
-        || saved.height < px(config.min_height).saturating_sub(side + top);
+    let below = recorded.is_none()
+        && (saved.width < px(config.min_width).saturating_sub(2 * side)
+            || saved.height < px(config.min_height).saturating_sub(side + top));
     let default = below.then(|| LogicalSize::new(config.width, config.height).to_physical(scale));
-    let relocated = reachable_client(client, header_height, areas, fallback, default);
+    let relocated = reachable_client(client, header_height, &areas, fallback, default);
     let target = relocated.unwrap_or(client);
     (
         PhysicalPosition::new(
@@ -241,7 +312,7 @@ fn restore_request(
             target.position.y.saturating_sub(client_offset.y),
         ),
         target.size,
-        relocated.map(|_| scale),
+        recorded.or(relocated.map(|_| scale)),
     )
 }
 
@@ -335,13 +406,13 @@ mod tests {
         let laptop = rect(0, 50, 3024, 1840);
         let saved = decode(&saved_state(1600, 100, 602, 470));
         let offset = tauri::PhysicalPosition::new(0, 0);
-        let request = |areas: &[tauri::PhysicalRect<i32, u32>]| {
-            super::restore_request(&saved, offset, 96, areas, (laptop, 2.0), &config())
+        let request = |areas: &[(tauri::PhysicalRect<i32, u32>, f64)]| {
+            super::restore_request(&saved, None, offset, 2.0, areas, (laptop, 2.0), &config())
         };
         // The 1x external overlaps the 2x laptop's physical rect, so the scale
         // this rect was saved at is ambiguous. Keep it as saved.
         assert_eq!(
-            request(&[laptop, external]),
+            request(&[(laptop, 2.0), (external, 1.0)]),
             (
                 tauri::PhysicalPosition::new(1600, 100),
                 tauri::PhysicalSize::new(602, 470),
@@ -352,11 +423,100 @@ mod tests {
         // but 301x235 points is below the minimum at its known scale. Send the
         // default in the laptop's logical units.
         assert_eq!(
-            request(&[laptop]),
+            request(&[(laptop, 2.0)]),
             (
                 tauri::PhysicalPosition::new(312, 50),
                 tauri::PhysicalSize::new(2400, 1600),
                 Some(2.0)
+            ),
+        );
+    }
+
+    // The issue #3083 layout: a 2x laptop (1512x982 points) with a 1x external
+    // to its right. Their physical rects overlap from x 1512 to 3024.
+    fn mixed_scale_monitors() -> [(tauri::PhysicalRect<i32, u32>, f64); 2] {
+        [
+            (rect(0, 66, 3024, 1898), 2.0),
+            (rect(1512, -317, 3440, 1415), 1.0),
+        ]
+    }
+
+    fn logical_request(
+        saved: &super::SavedGeometry,
+        recorded: Option<f64>,
+        startup: f64,
+        monitors: &[(tauri::PhysicalRect<i32, u32>, f64)],
+    ) -> (tauri::LogicalPosition<f64>, tauri::LogicalSize<f64>) {
+        let offset = tauri::PhysicalPosition::new(0, 0);
+        let (position, size, scale) = super::restore_request(
+            saved,
+            recorded,
+            offset,
+            startup,
+            monitors,
+            monitors[0],
+            &config(),
+        );
+        let scale = scale.expect("sent in logical units");
+        (position.to_logical(scale), size.to_logical(scale))
+    }
+
+    #[test]
+    fn recorded_scale_restores_logical_frame_whichever_screen_starts_the_window() {
+        let monitors = mixed_scale_monitors();
+        // Saved on the 2x laptop at 1200x750 points, relaunched on the 1x external.
+        let laptop = decode(&saved_state(200, 66, 2400, 1500));
+        assert_eq!(
+            logical_request(&laptop, Some(2.0), 1.0, &monitors),
+            (
+                tauri::LogicalPosition::new(100.0, 33.0),
+                tauri::LogicalSize::new(1200.0, 750.0)
+            ),
+        );
+        // Saved on the 1x external, relaunched on the 2x laptop.
+        let external = decode(&saved_state(2212, -317, 2323, 1089));
+        assert_eq!(
+            logical_request(&external, Some(1.0), 2.0, &monitors),
+            (
+                tauri::LogicalPosition::new(2212.0, -317.0),
+                tauri::LogicalSize::new(2323.0, 1089.0)
+            ),
+        );
+        // A 1x save below the minimum at 2x is kept: its points are known.
+        let small = decode(&saved_state(2212, 100, 602, 470));
+        assert_eq!(
+            logical_request(&small, Some(1.0), 2.0, &monitors).1,
+            tauri::LogicalSize::new(602.0, 470.0),
+        );
+    }
+
+    #[test]
+    fn recorded_scale_measures_reachability_in_points_after_unplugging() {
+        // Saved on the 1x external, which is gone. Its pixels still fall in the
+        // laptop's physical rect, but its points are right of the laptop.
+        let saved = decode(&saved_state(2212, 100, 1000, 600));
+        let laptop = &mixed_scale_monitors()[..1];
+        assert_eq!(
+            logical_request(&saved, Some(1.0), 2.0, laptop),
+            (
+                tauri::LogicalPosition::new(256.0, 33.0),
+                tauri::LogicalSize::new(1000.0, 600.0)
+            ),
+        );
+    }
+
+    #[test]
+    fn without_a_recorded_scale_the_request_is_unchanged() {
+        let monitors = mixed_scale_monitors();
+        let offset = tauri::PhysicalPosition::new(0, 0);
+        let saved = decode(&saved_state(200, 66, 2400, 1500));
+        // Reachable: sent as physical pixels, which macOS converts at the startup scale.
+        assert_eq!(
+            super::restore_request(&saved, None, offset, 1.0, &monitors, monitors[0], &config()),
+            (
+                tauri::PhysicalPosition::new(200, 66),
+                tauri::PhysicalSize::new(2400, 1500),
+                None
             ),
         );
     }
@@ -368,8 +528,15 @@ mod tests {
         let fallback = |width, height, area| {
             let saved = decode(&saved_state(5530, 100, width, height));
             let offset = tauri::PhysicalPosition::new(0, 0);
-            let (position, size, scale) =
-                super::restore_request(&saved, offset, 96, &[area, left], (area, 2.0), &config());
+            let (position, size, scale) = super::restore_request(
+                &saved,
+                None,
+                offset,
+                2.0,
+                &[(area, 2.0), (left, 2.0)],
+                (area, 2.0),
+                &config(),
+            );
             assert_eq!(scale, Some(2.0));
             Some(tauri::PhysicalRect { position, size })
         };
@@ -390,9 +557,17 @@ mod tests {
         let offset = tauri::PhysicalPosition::new(0, 0);
         let relocated = |scale, width, height| {
             let saved = decode(&saved_state(100, 100, width, height));
-            super::restore_request(&saved, offset, 96, &[area], (area, scale), &config())
-                .2
-                .is_some()
+            super::restore_request(
+                &saved,
+                None,
+                offset,
+                2.0,
+                &[(area, scale)],
+                (area, scale),
+                &config(),
+            )
+            .2
+            .is_some()
         };
         // tao applies the 480x400 minimum to an undecorated Windows frame. The
         // shadow insets (size frame plus padded border on the sides and bottom,
@@ -492,9 +667,10 @@ mod tests {
         assert_eq!(
             super::restore_request(
                 &saved,
+                None,
                 tauri::PhysicalPosition::new(7, 0),
-                48,
-                &[area],
+                1.0,
+                &[(area, 1.0)],
                 (area, 1.0),
                 &config()
             ),
@@ -555,14 +731,30 @@ mod tests {
         );
         let offset = tauri::PhysicalPosition::new(0, 0);
         assert_eq!(
-            super::restore_request(&saved, offset, 48, &[area], (area, 1.0), &config()),
+            super::restore_request(
+                &saved,
+                None,
+                offset,
+                1.0,
+                &[(area, 1.0)],
+                (area, 1.0),
+                &config()
+            ),
             expected
         );
         // Resize is asynchronous too: validating only startup width misses
         // the right-hand controls of a wider saved client.
         let saved = decode(&saved_state(100, 120, 1800, 800));
         assert_eq!(
-            super::restore_request(&saved, offset, 48, &[area], (area, 1.0), &config()),
+            super::restore_request(
+                &saved,
+                None,
+                offset,
+                1.0,
+                &[(area, 1.0)],
+                (area, 1.0),
+                &config()
+            ),
             (
                 area.position,
                 tauri::PhysicalSize::new(1440, 800),
@@ -577,7 +769,15 @@ mod tests {
         let offset = tauri::PhysicalPosition::new(7, 0);
         let saved = decode(&saved_state(-7, 0, 1920, 1000));
         assert_eq!(
-            super::restore_request(&saved, offset, 48, &[area], (area, 1.0), &config()),
+            super::restore_request(
+                &saved,
+                None,
+                offset,
+                1.0,
+                &[(area, 1.0)],
+                (area, 1.0),
+                &config()
+            ),
             (
                 tauri::PhysicalPosition::new(-7, 0),
                 tauri::PhysicalSize::new(1920, 1000),
@@ -589,7 +789,15 @@ mod tests {
         state["main"]["prev_x"] = json!(100);
         state["main"]["prev_y"] = json!(-450);
         assert_eq!(
-            super::restore_request(&decode(&state), offset, 48, &[area], (area, 1.0), &config()),
+            super::restore_request(
+                &decode(&state),
+                None,
+                offset,
+                1.0,
+                &[(area, 1.0)],
+                (area, 1.0),
+                &config()
+            ),
             (
                 tauri::PhysicalPosition::new(473, 0),
                 tauri::PhysicalSize::new(960, 640),
@@ -600,7 +808,15 @@ mod tests {
         state["main"]["maximized"] = json!(false);
         state["main"]["fullscreen"] = json!(true);
         assert_eq!(
-            super::restore_request(&decode(&state), offset, 48, &[area], (area, 1.0), &config()),
+            super::restore_request(
+                &decode(&state),
+                None,
+                offset,
+                1.0,
+                &[(area, 1.0)],
+                (area, 1.0),
+                &config()
+            ),
             (
                 tauri::PhysicalPosition::new(0, 0),
                 tauri::PhysicalSize::new(960, 640),
@@ -665,6 +881,36 @@ mod tests {
         assert_eq!(std::fs::read(&path).unwrap(), original);
         super::restore(&window).unwrap();
         assert!(!path.exists());
+    }
+
+    #[test]
+    fn onboarding_records_scale_beside_both_saves_and_restore_clears_its_copy() {
+        let (dir, app) = fixture();
+        let state = dir.path().join(tauri_plugin_window_state::DEFAULT_FILENAME);
+        std::fs::write(
+            &state,
+            serde_json::to_vec(&saved_state(100, 120, 960, 640)).unwrap(),
+        )
+        .unwrap();
+        let mut plugin = super::builder().build();
+        plugin.initialize(app.handle(), Value::Null).unwrap();
+        let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .unwrap();
+        let window = webview.as_ref().window();
+        plugin.window_created(window.clone());
+        super::onboarding_preserve_window(webview).unwrap();
+        let scale = window.scale_factor().unwrap();
+        for name in [super::SCALE, super::INTRO_SCALE] {
+            let bytes = std::fs::read(dir.path().join(name)).unwrap();
+            assert_eq!(super::saved_scale(&bytes, "main"), Some(scale));
+            assert_eq!(super::saved_scale(&bytes, "other"), None);
+        }
+        assert_eq!(super::saved_scale(br#"{"main":{"scale":0}}"#, "main"), None);
+        super::restore(&window).unwrap();
+        assert!(!dir.path().join(super::INTRO_GEOMETRY).exists());
+        assert!(!dir.path().join(super::INTRO_SCALE).exists());
+        assert!(dir.path().join(super::SCALE).exists());
     }
 
     #[test]
