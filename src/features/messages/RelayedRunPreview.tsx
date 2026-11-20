@@ -9,7 +9,7 @@ import type { RelaySession } from "../relay/session";
 import { avatarMedia } from "../../shared/avatar-source";
 import { AvatarStack } from "../../shared/design-system/ui/AvatarStack";
 import { Badge } from "../../shared/design-system/ui/Badge";
-import { formatTime } from "../../shared/datetime";
+import { formatFullTimestamp } from "../../shared/datetime";
 import { CaretRightIcon } from "../../shared/design-system/icons";
 import type { RelayedRun } from "./activity-groups";
 import { MessageTimestamp, useMessageTimeVisible } from "./MessageTimestamp";
@@ -97,7 +97,7 @@ export function RelayedRunPreview({
     : sameSource
       ? ""
       : " from other chats";
-  const label = `${expanded ? "Collapse" : "Show"} ${run.relayed.length} messages${from} by ${names}. Latest, ${latest?.name}: ${preview}, ${formatTime(last.createdAt)}`;
+  const label = `${expanded ? "Collapse" : "Show"} ${run.relayed.length} messages${from} by ${names}. Latest, ${latest?.name}: ${preview}, ${formatFullTimestamp(last.createdAt)}`;
   return (
     <div ref={container} className={styles.relayedRun} data-layout={layout}>
       <div
@@ -131,7 +131,7 @@ export function RelayedRunPreview({
         {(chat || !sameSource) && (
           <span
             className={styles.relayedSubtle}
-            data-relayed-from=""
+            data-relayed-from={chat?.channelType === "dm" ? "dm" : ""}
             aria-hidden="true"
           >
             {expanded ? "From" : "from"}

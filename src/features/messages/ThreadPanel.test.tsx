@@ -1097,6 +1097,31 @@ it("decides the line once a hidden reader is shown, and again for each ordinary 
   ).toBeTruthy();
   expect(h.element.scrollTop).toBe(300);
 });
+it("keeps the day divider above a relayed group that starts a day, open or closed", () => {
+  const h = messagesHarness();
+  const { reply } = unreadReplies(h);
+  const later = row.createdAt + 2 * 86_400;
+  const relayed = ["a", "b"].map((name, index) => ({
+    ...reply(`relayed ${name}`, later + index),
+    authorId: viewer,
+    relayedFrom: { agent: "zerk", verified: true },
+  }));
+  h.snapshot.replies = [reply("plain", row.createdAt + 1), ...relayed];
+  h.render();
+  const dividers = () =>
+    [...h.element.querySelectorAll("[data-day]")].map((item) =>
+      item.getAttribute("data-day"),
+    );
+  const closed = dividers();
+  expect(closed.at(-1)).not.toBe(closed.at(-2));
+  fireEvent.click(
+    screen.getByRole("button", { name: /^Show 2 messages by zerk\./ }),
+  );
+  expect(
+    screen.getByRole("button", { name: /^Collapse 2 messages by zerk\./ }),
+  ).toBeVisible();
+  expect(dividers()).toEqual(closed);
+});
 it("a kept line still splits relayed replies while a late navigation decides it again", () => {
   const h = messagesHarness();
   const { reply, unread } = unreadReplies(h);

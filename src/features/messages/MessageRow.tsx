@@ -9,7 +9,10 @@ import { useActivityIndicator } from "./use-activity-indicator";
 import type { ActivityRowPresentation } from "./activity-presentation";
 import { ShimmerText } from "../../shared/design-system/ui/ShimmerText";
 import { Collapsible } from "@base-ui/react/collapsible";
-import { formatItemTimestamp } from "../../shared/datetime";
+import {
+  formatFullTimestamp,
+  formatItemTimestamp,
+} from "../../shared/datetime";
 import { ProfilePeek } from "../profiles/ProfilePeek";
 import { AgentAvatar } from "../agents/AgentAvatar";
 import {
@@ -2191,7 +2194,7 @@ function RelayedMessageRow(props: MessageRowProps) {
                 ref={trigger}
                 data-buzz-ui=""
                 className={styles.relayedTrigger}
-                aria-label={`${agent.name}${chatLabel ? ` from ${chatLabel}` : ""}: ${preview}${row.edited ? " (edited)" : ""}${row.replyCount > 0 ? `, ${row.replyCount === 1 ? "1 reply" : `${row.replyCount} replies`}` : ""}`}
+                aria-label={`${agent.name}${chatLabel ? ` from ${chatLabel}` : ""}: ${preview}${row.edited ? " (edited)" : ""}${row.replyCount > 0 ? `, ${row.replyCount === 1 ? "1 reply" : `${row.replyCount} replies`}` : ""}, ${formatFullTimestamp(row.createdAt)}`}
               />
               <span className={styles.relayedAvatar} aria-hidden="true">
                 <AgentAvatar
@@ -2217,7 +2220,7 @@ function RelayedMessageRow(props: MessageRowProps) {
                   <span
                     className={styles.relayedSubtle}
                     data-relayed-source=""
-                    data-relayed-from=""
+                    data-relayed-from={chat.channelType === "dm" ? "dm" : ""}
                     aria-hidden="true"
                   >
                     from

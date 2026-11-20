@@ -4300,9 +4300,11 @@ html[data-keyboard-navigation]
   max-inline-size: max-content;
 }
 /* A narrow conversation keeps the avatar, the chat and the message: the name
-   and "from" go. An opened fold's lines keep naming each sender. */
+   and "from" go. An opened fold's lines keep naming each sender, and "from"
+   stays before a direct message's person, whose name has no "#" to mark it
+   as the chat. */
 @container messages (max-width: 30rem) {
-  .relayedHeader > [data-relayed-from],
+  .relayedHeader > [data-relayed-from]:not([data-relayed-from="dm"]),
   .relayedHeader > .relayedName:not(.relayedRunItems .relayedName) {
     display: none;
   }

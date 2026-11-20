@@ -5,6 +5,7 @@ import { afterEach, expect, it } from "vitest";
 import { stubAvatarBrowserApis } from "../agents/avatar-testing";
 import type { ChannelMessage, Profile } from "../relay/contracts";
 import type { RelaySession } from "../relay/session";
+import { formatFullTimestamp } from "../../shared/datetime";
 import { RelayedRunPreview } from "./RelayedRunPreview";
 
 stubAvatarBrowserApis();
@@ -20,7 +21,10 @@ const session = {
   channels: {
     list: () => ({
       status: "ready",
-      channels: [{ id: "source", name: "rebase", channelType: "stream" }],
+      channels: [
+        { id: "source", name: "rebase", channelType: "stream" },
+        { id: "direct", name: "Alice", channelType: "dm" },
+      ],
     }),
     subscribeList: subscribe,
   },
@@ -75,11 +79,16 @@ it("leads with the latest message and how many more came from its one chat", () 
     relayed("a", "mira", "Starting on the row", "source"),
     relayed("b", "zerk", "Rebase on main first", "source"),
   ]);
+  const trigger = screen.getByRole("button", {
+    name: /^Show 2 messages from #rebase by Zerk and Mira\. Latest, Zerk: Rebase on main first, /,
+  });
+  expect(trigger).toBeVisible();
+  // Its time is hidden from assistive technology, so the label reads the date.
   expect(
-    screen.getByRole("button", {
-      name: /^Show 2 messages from #rebase by Zerk and Mira\. Latest, Zerk: Rebase on main first, /,
-    }),
-  ).toBeVisible();
+    trigger
+      .getAttribute("aria-label")
+      ?.endsWith(`, ${formatFullTimestamp(1_000)}`),
+  ).toBe(true);
   expect(screen.getByRole("link", { name: /rebase/ })).toBeVisible();
   expect(view.container).toHaveTextContent("Rebase on main first");
   expect(view.container).toHaveTextContent("+1");
@@ -142,4 +151,19 @@ it("names the one chat once, not on each line inside", () => {
     />,
   );
   expect(sameSource(view)).toBeNull();
+});
+
+it("marks a direct message's from, which a narrow conversation keeps", () => {
+  const view = preview([
+    relayed("a", "mira", "Starting on the row", "direct"),
+    relayed("b", "zerk", "Rebase on main first", "direct"),
+  ]);
+  expect(
+    screen.getByRole("button", {
+      name: /^Show 2 messages from Alice by Zerk and Mira\./,
+    }),
+  ).toBeVisible();
+  expect(
+    view.container.querySelector('[data-relayed-from="dm"]'),
+  ).toHaveTextContent("from");
 });

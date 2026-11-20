@@ -53,6 +53,7 @@ import { MessageRow } from "./MessageRow";
 import { MessageContextMenus } from "./MessageActionBar";
 import { ReplySummary } from "./ReplySummary";
 import { setClockPreference } from "../../shared/clock-preference";
+import { formatFullTimestamp } from "../../shared/datetime";
 import { MessageManagement } from "./MessageManagement";
 import type { ChannelMessage, Profile } from "../relay/contracts";
 import type { AttachmentRendererProps } from "../conversation/contracts";
@@ -5599,12 +5600,13 @@ it("draws a verified relayed message as its agent's quiet line, never the signer
     day: false,
     retry: undefined,
   };
+  const when = formatFullTimestamp(row.createdAt);
   try {
     const view = renderDom(
       <MessageRow {...props} row={relayed(true, "source")} />,
     );
     const trigger = screen.getByRole("button", {
-      name: "Zerk from #rebase: Rebase on main",
+      name: `Zerk from #rebase: Rebase on main, ${when}`,
     });
     expect(screen.queryByText(/Relayed for/)).toBeNull();
     // The source chat stays a link on the line, above its button.
@@ -5626,14 +5628,14 @@ it("draws a verified relayed message as its agent's quiet line, never the signer
     );
     expect(
       screen.getByRole("button", {
-        name: "Zerk from #rebase: Rebase on main, 2 replies",
+        name: `Zerk from #rebase: Rebase on main, 2 replies, ${when}`,
       }),
     ).toBeVisible();
     expect(screen.getByText("2 replies")).toBeVisible();
     // A chat the reader is not in stays unnamed.
     view.rerender(<MessageRow {...props} row={relayed(true, "elsewhere")} />);
     expect(
-      screen.getByRole("button", { name: "Zerk: Rebase on main" }),
+      screen.getByRole("button", { name: `Zerk: Rebase on main, ${when}` }),
     ).toBeVisible();
     // Unverified, it is the signer's ordinary message with its notice.
     view.rerender(<MessageRow {...props} row={relayed(false, "source")} />);
@@ -5643,5 +5645,48 @@ it("draws a verified relayed message as its agent's quiet line, never the signer
     ).not.toBeNull();
   } finally {
     cleanup();
+  }
+});
+
+it("reads a relayed line's date when Message timestamps hides its clock", () => {
+  setClockPreference({ messageTimestamps: "hide" });
+  const subscribe = () => () => {};
+  const profiles = new Map([["zerk", { name: "Zerk", isAgent: true }]]);
+  const list = { status: "ready", channels: [] };
+  const session = {
+    viewer: "owner",
+    channels: { list: () => list, subscribeList: subscribe },
+    messages: {},
+    profiles: { snapshot: () => profiles, subscribe },
+  } as unknown as RelaySession;
+  const view = renderDom(
+    <MessageRow
+      row={{
+        ...row,
+        authorId: "owner",
+        replyCount: 0,
+        content: "Rebase on main",
+        relayedFrom: { agent: "zerk", verified: true },
+      }}
+      profile={{ name: "Gil" }}
+      session={session}
+      viewer="owner"
+      media={() => undefined}
+      onOpenLink={() => false}
+      day={false}
+      retry={undefined}
+    />,
+  );
+  try {
+    expect(
+      screen.getByRole("button", {
+        name: `Zerk: Rebase on main, ${formatFullTimestamp(row.createdAt)}`,
+      }),
+    ).toBeVisible();
+    // No clock shows on the line.
+    expect(view.container.querySelector("time [aria-hidden]")).toBeNull();
+  } finally {
+    cleanup();
+    setClockPreference({ messageTimestamps: "show" });
   }
 });
