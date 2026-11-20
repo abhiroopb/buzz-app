@@ -7,6 +7,8 @@ import { usageOn } from "../../features/agents/standalone-sessions";
 import { isTauri } from "@tauri-apps/api/core";
 import type { PluginModule } from "../../plugins/api";
 import { GooseLogoIcon } from "../../shared/design-system/icons";
+import { GatewayForwarding } from "../../features/agents/gateway/forwarding";
+import { upstreamFor } from "../../features/agents/gateway/route";
 import {
   type Config,
   config,
@@ -21,13 +23,14 @@ import {
 } from "../../features/agents/recommended";
 import { gooseRun } from "./run";
 import { readModelSettings } from "../../features/agents/model-settings";
-import { explainTurn, GooseSetup, REVIEW_REFUSED } from "./setup";
+import { explainTurn, GooseSetup, readNoProxy, REVIEW_REFUSED } from "./setup";
 import { createTabs } from "./tabs";
 import { GooseHistory } from "./transcript";
 import { readUsage } from "./usage";
 
 export const TYPE_ID = "goose";
-
+/** The harness goose declares to the gateway, its descriptor upstream key. */
+export const HARNESS = "goose";
 export const inject = ["agents", "host", "agentProtection", "settingsCards"];
 export const apply: PluginModule["apply"] = (ctx) => {
   // Only the desktop app can start `goose-acp`; no unusable type elsewhere.
@@ -46,6 +49,23 @@ export const apply: PluginModule["apply"] = (ctx) => {
     repositoriesContext,
     agents.storage,
     recommended,
+    // Without a goose upstream in this build, the runner sends every turn
+    // without the gateway, so nothing forwards.
+    ctx.pluginOwner && upstreamFor(HARNESS)
+      ? new GatewayForwarding(
+          ctx.pluginOwner,
+          { upstream: HARNESS, native: "goose" },
+          async () => {
+            // Without a host to read them, a forwarded goose could send its
+            // loopback requests to a proxy, so nothing opens.
+            if (!host.spawn)
+              throw new Error("No host to read proxy exceptions");
+            return readNoProxy(host.spawn.bind(host));
+          },
+        )
+      : undefined,
+    // Read at a forwarded turn, after `setup` exists.
+    async () => (await setup.providers()).defaults.provider,
   );
   runtime.usageOn = usageOn(ctx.settingsCards);
   const desktop =
@@ -118,6 +138,9 @@ export const apply: PluginModule["apply"] = (ctx) => {
 
   agents.register<Config>({
     id: TYPE_ID,
+    // Declares its harness to the gateway, which forwards its agents' turns
+    // where their membership routes through it.
+    gateway: { harness: HARNESS },
     retire: (pubkey) => runtime.retire(pubkey),
     protection: true,
     title: "Goose",

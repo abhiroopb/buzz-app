@@ -205,6 +205,7 @@ const noChannels: ReturnType<ComposerSession["channels"]["list"]> = {
 };
 const noSubscription = () => () => {};
 const noAgents: readonly string[] = [];
+const cannotOpen = () => false;
 
 type AcceptedDraft = {
   next: MentionDraft;
@@ -3408,6 +3409,29 @@ function Composer({
     setAttachmentsExiting(!hasAttachments);
   }
   if (attachmentsExiting && editing.target) setAttachmentsExiting(false);
+  // Keystrokes re-render the composer; stable commands let contributed tools
+  // and accessories skip those renders while still calling the latest code.
+  const toolCommands = useLatestCallbacks({
+    insertText: insertToolText,
+    insertMention,
+    insertMentions,
+    replaceRecipients,
+    replaceRecipientsIfEmpty,
+    insertResource,
+    focus: () => input.current?.focus(),
+  });
+  const voiceCommands = useLatestCallbacks({ capture: voice.begin });
+  // Each keystroke projects new arrays; equal ones keep mention consumers still.
+  const selectedRecipients = useEqualList(
+    value.recipients,
+    (a, b) => a.pubkey === b.pubkey && a.name === b.name,
+  );
+  const addressedAgents = useEqualList(addressedKeys, Object.is);
+  // Availability is read during render, so it stays a prop that changes with
+  // the host's panels; dispatch goes through the latest handler.
+  const accessoryCommands = useLatestCallbacks({
+    open: (target: string) => onOpenLink?.(target) ?? false,
+  });
   const context = (
     <div className={styles.composerContext}>
       {!cached && !submission && (
@@ -3425,8 +3449,8 @@ function Composer({
           scope={scope}
           channelId={channelId}
           threadRootId={threadRootId}
-          canOpen={(target) => canOpenLink?.(target) ?? false}
-          open={(target) => onOpenLink?.(target) ?? false}
+          canOpen={canOpenLink ?? cannotOpen}
+          open={accessoryCommands.open}
         />
       )}
     </div>
@@ -3520,7 +3544,7 @@ function Composer({
       </>
     );
   return (
-    <SelectedMentionContext.Provider value={value.recipients}>
+    <SelectedMentionContext.Provider value={selectedRecipients}>
       {context}
       {active && bringing.dialog}
       {active && nonmembers.dialog}
@@ -3603,7 +3627,7 @@ function Composer({
             value={editing.target ? undefined : workspace}
           >
             <AddressedAgentsContext.Provider
-              value={editing.target ? noAgents : addressedKeys}
+              value={editing.target ? noAgents : addressedAgents}
             >
               <ComposerCompletions
                 registry={extensions.completions}
@@ -3992,7 +4016,7 @@ function Composer({
                   <ComposerTools
                     registry={extensions.tools}
                     {...(canAttach && !editing.target
-                      ? { capture: voice.begin }
+                      ? { capture: voiceCommands.capture }
                       : {})}
                     renderLeading={renderLeadingTools}
                     session={session}
@@ -4003,13 +4027,7 @@ function Composer({
                     inviteAgents={agentChoices && !editing.target}
                     recipients={recipients}
                     audience={audience}
-                    insertText={insertToolText}
-                    insertMention={insertMention}
-                    insertMentions={insertMentions}
-                    replaceRecipients={replaceRecipients}
-                    replaceRecipientsIfEmpty={replaceRecipientsIfEmpty}
-                    insertResource={insertResource}
-                    focus={() => input.current?.focus()}
+                    {...toolCommands}
                   />
                 ) : (
                   renderLeadingTools(null)
@@ -4230,6 +4248,43 @@ function Composer({
       )}
     </SelectedMentionContext.Provider>
   );
+}
+
+/** Stable functions that call the latest of `callbacks`, which must keep the same keys. */
+function useLatestCallbacks<
+  T extends { [K in keyof T]: (...args: never[]) => unknown },
+>(callbacks: T): T {
+  const latest = useRef(callbacks);
+  useLayoutEffect(() => {
+    latest.current = callbacks;
+  });
+  const [stable] = useState(
+    () =>
+      Object.fromEntries(
+        (Object.keys(callbacks) as (keyof T)[]).map((key) => [
+          key,
+          (...args: never[]) => latest.current[key](...args),
+        ]),
+      ) as T,
+  );
+  return stable;
+}
+
+/** The previous list while `list` holds the same entries, else `list`. */
+function useEqualList<T>(
+  list: readonly T[],
+  same: (a: T, b: T) => boolean,
+): readonly T[] {
+  const [kept, setKept] = useState(list);
+  if (
+    kept !== list &&
+    (kept.length !== list.length ||
+      kept.some((item, index) => !same(item, list[index] as T)))
+  ) {
+    setKept(list);
+    return list;
+  }
+  return kept;
 }
 
 /** Retain the last preview for collapse; context semantics clear immediately. */
