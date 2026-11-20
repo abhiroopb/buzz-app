@@ -329,7 +329,8 @@ export function InviteLinks({
               <Button
                 variant="destructive"
                 loading={revoking}
-                disabled={revoking || locked}
+                // Loading alone blocks a second submit and keeps focus here for Retry.
+                disabled={locked}
                 onClick={() => void revoke()}
               >
                 {revokeError ? "Retry" : "Revoke"}

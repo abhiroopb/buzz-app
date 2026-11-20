@@ -1158,3 +1158,35 @@ it("shows a revoke failure that arrived while Links was hidden", async () => {
     screen.getByRole("list", { name: "Invite links", hidden: true }),
   ).toHaveTextContent("Active");
 });
+
+it("keeps focus on the confirm action after a refused revoke", async () => {
+  const user = userEvent.setup();
+  let finish!: (response: Response) => void;
+  const held = new Promise<Response>((resolve) => {
+    finish = resolve;
+  });
+  broker({
+    invites: () => Response.json({ invites: [link(1)], next_before: null }),
+    "invite-revoke": () => held,
+  });
+  const { relay: data } = relay(owner);
+  render(
+    <CommunityAdmin relay={data} active={() => true} selectedMethod="links" />,
+  );
+  await user.click(await screen.findByRole("button", { name: /^Revoke Link/ }));
+  const dialog = await screen.findByRole("alertdialog");
+  const action = within(dialog).getByRole("button", { name: "Revoke" });
+  action.focus();
+  await user.keyboard("{Enter}");
+  // While loading, the action stays focusable (a disabled button drops focus to
+  // the body in browsers) and blocks a second submit.
+  await waitFor(() => expect(action).toHaveAttribute("aria-busy", "true"));
+  expect(action).not.toHaveAttribute("disabled");
+  await act(async () => {
+    finish(unavailable());
+    await held;
+  });
+  await within(dialog).findByRole("alert");
+  expect(action).toHaveFocus();
+  expect(action).toHaveTextContent("Retry");
+});
