@@ -2682,7 +2682,21 @@ export const COMPONENT_SPECIMENS: Record<string, () => ReactNode> = {
     <SpecimenGroup
       key="popout"
       label="Popout accordion in a long list"
-      code={`<Accordion variant="popout" items={handbookSections} />`}
+      code={`<Accordion
+  variant="popout"
+  items={[
+    {
+      value: "Access",
+      title: "Access",
+      content: (
+        <p className="m-0 px-4.5 text-body-sm">
+          Use the step-free entrance on Grove Street. From the lobby, take
+          the lift to the second floor and follow the signs to Studio B.
+        </p>
+      ),
+    },
+  ]}
+/>`}
     >
       <section
         aria-label="Popout accordion in a long list"
@@ -2699,7 +2713,10 @@ export const COMPONENT_SPECIMENS: Record<string, () => ReactNode> = {
                 "Materials",
                 "Download workshop-materials-and-accessibility-preparation-guide-for-first-time-attendees.pdf before you arrive.",
               ],
-              ["Access", "The main entrance and studio are step-free."],
+              [
+                "Access",
+                "Use the step-free entrance on Grove Street. From the lobby, take the lift to the second floor and follow the signs to Studio B.",
+              ],
               ["Breaks", "Breaks begin at 11 a.m. and 2 p.m."],
               ["Lunch", "The café has vegetarian and gluten-free options."],
               ["Wi-Fi", "Collect the guest network details at check-in."],
@@ -2714,7 +2731,7 @@ export const COMPONENT_SPECIMENS: Record<string, () => ReactNode> = {
           ).map(([title, text]) => ({
             value: title,
             title,
-            content: <p className="m-0 text-body-sm">{text}</p>,
+            content: <p className="m-0 px-4.5 text-body-sm">{text}</p>,
           }))}
         />
       </section>
@@ -2734,7 +2751,7 @@ export const COMPONENT_SPECIMENS: Record<string, () => ReactNode> = {
             <div className="rounded-row border border-standard p-2">
               <section
                 aria-label="Publishing instructions"
-                className="max-h-48 overflow-y-auto"
+                className="max-h-48 overflow-y-auto px-2"
                 tabIndex={0}
               >
                 <p>Publishing instructions go here.</p>
@@ -2764,7 +2781,7 @@ export const COMPONENT_SPECIMENS: Record<string, () => ReactNode> = {
                 value: "Response style",
                 title: "Response style",
                 content: (
-                  <p className="m-0 text-body-sm">
+                  <p className="m-0 px-4.5 text-body-sm">
                     Use plain language and lead with the result.
                   </p>
                 ),
@@ -2780,7 +2797,7 @@ export const COMPONENT_SPECIMENS: Record<string, () => ReactNode> = {
                         aria-label="Publishing instructions"
                         // biome-ignore lint/a11y/noNoninteractiveTabindex: This caller supplies a keyboard-scrollable region.
                         tabIndex={0}
-                        className="grid max-h-48 gap-4 overflow-y-auto text-body-sm"
+                        className="grid max-h-48 gap-4 overflow-y-auto px-2 text-body-sm"
                       >
                         <p className="m-0">
                           Before sharing a document, identify the audience and

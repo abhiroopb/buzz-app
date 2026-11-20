@@ -56,6 +56,29 @@ test("popout works as a standalone list and allows multiple open rows", async ({
   await access.click();
   await expect(materials).toHaveAttribute("aria-expanded", "true");
   await expect(access).toHaveAttribute("aria-expanded", "true");
+  await expect
+    .poll(() =>
+      accessRow.evaluate((row) => {
+        const trigger = row.querySelector(".buzz-accordion-trigger");
+        const body = row.querySelector(".buzz-accordion-content p");
+        if (!trigger || !body) return false;
+        const textEdges = (element: Element) => {
+          const bounds = element.getBoundingClientRect();
+          const style = getComputedStyle(element);
+          return {
+            left: bounds.left + Number.parseFloat(style.paddingLeft),
+            right: bounds.right - Number.parseFloat(style.paddingRight),
+          };
+        };
+        const heading = textEdges(trigger);
+        const paragraph = textEdges(body);
+        return (
+          Math.abs(heading.left - paragraph.left) < 1 &&
+          Math.abs(heading.right - paragraph.right) < 1
+        );
+      }),
+    )
+    .toBe(true);
   const expanded = list.locator(".buzz-accordion-item[data-open]");
   await expect(expanded).toHaveCount(2);
   const longContent = expanded.first().locator(".buzz-accordion-content");
