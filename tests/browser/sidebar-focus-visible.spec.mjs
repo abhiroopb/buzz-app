@@ -124,11 +124,17 @@ test.describe("passive channel removal", () => {
 
   // Only a browser can show whether recovering focus after a relay update
   // reveals the keyboard focus or displaces the content the user scrolled to.
-  for (const { title, keepViewport } of [
+  for (const { title, keepViewport, removeSolo = false } of [
     {
       title:
         "keeps a contributed Solo row in view when a focused channel is archived above it",
       keepViewport: true,
+    },
+    {
+      title:
+        "keeps the viewport steady when a focused contributed Solo row disappears above it",
+      keepViewport: true,
+      removeSolo: true,
     },
     {
       title: "reveals replacement focus when an in-view channel is archived",
@@ -137,9 +143,10 @@ test.describe("passive channel removal", () => {
   ])
     test(title, async ({ page, app }) => {
       await page.setViewportSize({ width: 1100, height: 430 });
-      await page.goto(
-        keepViewport ? `${app.origin}/?solo-region-fixture` : app.origin,
-      );
+      const fixture = removeSolo
+        ? "?solo-region-fixture&compose-workspaces"
+        : "?solo-region-fixture";
+      await page.goto(keepViewport ? `${app.origin}/${fixture}` : app.origin);
       await openPage(page, "Messages");
       const sidebar = page.getByRole("navigation", {
         name: "Subscribed channels",
@@ -149,6 +156,12 @@ test.describe("passive channel removal", () => {
       const beta = workspace.getByRole("button", { name: "Beta", exact: true });
       const soloRow = (id) =>
         sidebar.locator(`button[data-solo-destination-id="${id}"]`);
+      if (removeSolo) {
+        const more = sidebar.getByRole("button", {
+          name: "Show more chats in Chats",
+        });
+        await more.click();
+      }
       await expect(soloRow(soloIds.at(-1))).toBeVisible();
       if (keepViewport) {
         await page.evaluate(async (ids) => {
@@ -163,47 +176,64 @@ test.describe("passive channel removal", () => {
             .locator(`[data-solo-destination-root="${soloIds[8]}"]`)
             .locator(`button[data-solo-destination-id="${soloIds[8]}"]`)
         : soloRow(soloIds[8]);
+      const departing = removeSolo
+        ? sidebar
+            .getByRole("navigation", { name: "Solo conversations" })
+            .locator(`button[data-solo-destination-id="${soloIds[0]}"]`)
+        : beta;
       await expect(anchor).toBeVisible();
-      await expect.poll(() => app.relay.hasRoute("primary", "beta")).toBe(true);
-      await beta.focus();
+      if (!removeSolo)
+        await expect
+          .poll(() => app.relay.hasRoute("primary", "beta"))
+          .toBe(true);
+      await departing.focus();
       // Leave space for the removed row's height and exercise focus with
       // native scroll anchoring disabled. Layout anchoring has its own tests.
       const inset = keepViewport
-        ? await beta.evaluate((row) => {
-            const viewport = row.closest("nav");
+        ? await sidebar.evaluate((viewport) => {
             viewport.style.overflowAnchor = "none";
             return viewport.clientHeight / 3;
           })
         : 10;
-      await (keepViewport ? anchor : beta).evaluate((row, offset) => {
-        const viewport = row.closest("nav");
+      await (keepViewport ? anchor : departing).evaluate((row, offset) => {
+        const viewport = row.closest('nav[aria-label="Subscribed channels"]');
         viewport.scrollTop +=
           row.getBoundingClientRect().top -
           viewport.getBoundingClientRect().top -
           offset;
       }, inset);
-      await expect(beta).toBeFocused();
+      await expect(departing).toBeFocused();
       if (keepViewport) {
-        await expect(beta).not.toBeInViewport();
+        await expect(departing).not.toBeInViewport();
         await expect(anchor).toBeInViewport({ ratio: 1 });
       } else {
-        await expect(beta).toBeInViewport({ ratio: 1 });
+        await expect(departing).toBeInViewport({ ratio: 1 });
         await expect(heading).not.toBeInViewport({ ratio: 1 });
       }
-      app.setChannelMetadata("beta", [
-        ["name", "Beta"],
-        ["t", "stream"],
-        ["public"],
-        ["archived", "true"],
-      ]);
-      await expect(
-        workspace.locator('button[data-channel-id="beta"]'),
-      ).toHaveCount(0);
+      const scrollTop = await sidebar.evaluate((nav) => nav.scrollTop);
+      if (removeSolo) {
+        await page.evaluate(
+          (id) => window.fixtureSoloRegion.present([id], []),
+          soloIds[0],
+        );
+      } else {
+        app.setChannelMetadata("beta", [
+          ["name", "Beta"],
+          ["t", "stream"],
+          ["public"],
+          ["archived", "true"],
+        ]);
+      }
+      await expect(departing).toHaveCount(0);
       if (keepViewport) {
         await expect(
           sidebar.locator("button[data-solo-destination-id]:focus"),
         ).toBeInViewport({ ratio: 1 });
         await expect(anchor).toBeInViewport({ ratio: 1 });
+        if (removeSolo)
+          expect(await sidebar.evaluate((nav) => nav.scrollTop)).toBe(
+            scrollTop,
+          );
       } else {
         await expect(heading).toBeFocused();
         await expect(heading).toBeInViewport({ ratio: 1 });

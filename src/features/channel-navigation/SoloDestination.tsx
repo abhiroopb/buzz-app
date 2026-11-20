@@ -39,6 +39,7 @@ import type { Navigation } from "../navigation/controller";
 import type { ChannelSummary } from "../relay/contracts";
 import type { RelaySession } from "../relay/session";
 import { conversationTarget, matchesConversation } from "./routes";
+import { recoverSidebarFocus } from "./sidebar-focus-recovery";
 import { soloSuccessor } from "./solo-successor";
 import type {
   SoloCardProps,
@@ -515,11 +516,12 @@ function useDestinationFocus(
     const node = root.current;
     const region = node?.closest("[data-sidebar-section]");
     return () => {
-      const owner = document.activeElement?.closest(
-        "[data-solo-destination-root]",
-      );
+      const active = document.activeElement;
+      const owner = active?.closest("[data-solo-destination-root]");
       if (!node || (owner ? owner !== node : !focused.current)) return;
-      queueMicrotask(() => {
+      const departing =
+        owner === node && active instanceof HTMLElement ? active : node;
+      recoverSidebarFocus(departing, () => {
         if (document.activeElement !== document.body) return;
         // The ref can capture the final order after this effect cleans up.
         const rows = neighbors.current;
@@ -532,13 +534,13 @@ function useDestinationFocus(
         const section = document.querySelector(
           `[data-sidebar-section="${CSS.escape(region?.getAttribute("data-sidebar-section") ?? "")}"]`,
         );
-        const candidates = [
-          ...ids.map(
-            (id) =>
-              id &&
-              document.querySelector<HTMLElement>(
-                `[data-solo-destination-id="${CSS.escape(id)}"]`,
-              ),
+        return [
+          ...ids.map((id) =>
+            id
+              ? document.querySelector<HTMLElement>(
+                  `[data-solo-destination-id="${CSS.escape(id)}"]`,
+                )
+              : null,
           ),
           ...(section?.querySelectorAll<HTMLElement>(
             "[data-solo-destination-id]",
@@ -549,11 +551,6 @@ function useDestinationFocus(
             '[data-sidebar-section^="solo-region:"] summary',
           ),
         ];
-        for (const candidate of candidates) {
-          if (!candidate || candidate.closest("[hidden], [inert]")) continue;
-          candidate.focus();
-          if (document.activeElement === candidate) break;
-        }
       });
     };
   }, [root, channelId, visible]);

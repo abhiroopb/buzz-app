@@ -1,5 +1,6 @@
 import { FadingLabel } from "./FadingLabel";
 import { activeChannelRows } from "../../features/channel-navigation/active-channel-rows";
+import { recoverSidebarFocus } from "../../features/channel-navigation/sidebar-focus-recovery";
 import { useSoloRowActivation } from "../../features/channel-navigation/useSoloRowActivation";
 import type { Navigation } from "../../features/navigation/controller";
 import { NavigationItem } from "../../shared/design-system/ui/NavigationItem";
@@ -72,15 +73,8 @@ export function ChannelSidebarRow({
     if (!button || !present) return;
     const document = button.ownerDocument;
     const section = button.closest("[data-sidebar-section]");
-    const sidebar = section?.closest("nav");
     return () => {
       if (document.activeElement !== button) return;
-      const row = button.getBoundingClientRect();
-      const viewport = sidebar?.getBoundingClientRect();
-      // A background update can remove a focused row the user scrolled past.
-      const exitAbove = !!viewport && row.bottom <= viewport.top;
-      const preventScroll =
-        exitAbove || (!!viewport && row.top >= viewport.bottom);
       const rows = [
         ...(section?.querySelectorAll<HTMLElement>("button[data-channel-id]") ??
           []),
@@ -92,7 +86,7 @@ export function ChannelSidebarRow({
       ].map((row) => row.dataset.channelId ?? "");
       // A plugin wrapper can remount this row and its neighbors. Resolve them
       // after the commit, excluding retained exits and focus moved elsewhere.
-      queueMicrotask(() => {
+      recoverSidebarFocus(button, (sidebar) => {
         if (
           (document.activeElement !== document.body &&
             document.activeElement !== button) ||
@@ -102,7 +96,7 @@ export function ChannelSidebarRow({
           return;
         const liveRows = activeChannelRows(sidebar);
         const sectionRows = activeChannelRows(section);
-        const candidates = [
+        return [
           liveRows.find(
             (row) =>
               row.dataset.channelId === channel.id &&
@@ -114,37 +108,6 @@ export function ChannelSidebarRow({
           ),
           section?.querySelector<HTMLElement>("details > summary"),
         ];
-        if (preventScroll) {
-          const frame = sidebar.getBoundingClientRect();
-          // A retained exit above the viewport can still leave the layout
-          // after this handoff. Leave room for that upward shift.
-          const top = frame.top + (exitAbove ? row.height : 0);
-          const inView = (candidate: HTMLElement | null | undefined) => {
-            if (!candidate || candidate.closest("[hidden], [inert], :disabled"))
-              return false;
-            const rect = candidate.getBoundingClientRect();
-            return (
-              rect.height > 0 && rect.top >= top && rect.bottom <= frame.bottom
-            );
-          };
-          // Keep focus visible where the user is reading, including when the
-          // original section is entirely outside the viewport.
-          const visible =
-            candidates.find(inView) ??
-            [
-              ...sidebar.querySelectorAll<HTMLButtonElement>(
-                "button[data-channel-id], button[data-solo-destination-id]",
-              ),
-            ].find(inView);
-          visible?.focus({ preventScroll: true });
-          if (visible && document.activeElement === visible) return;
-        }
-        for (const candidate of candidates) {
-          if (!candidate?.isConnected || candidate.closest("[hidden], [inert]"))
-            continue;
-          candidate.focus({ preventScroll });
-          if (document.activeElement === candidate) break;
-        }
       });
     };
   }, [channel.id, channel.channelType, present]);
