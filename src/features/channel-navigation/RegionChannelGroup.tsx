@@ -18,7 +18,7 @@ import { NavigationCard } from "../../shared/design-system/ui/NavigationItem";
 import { NavigationSectionHeading } from "../../shared/design-system/ui/NavigationSection";
 import { IconButton } from "../../shared/design-system/ui/IconButton";
 import { MenuItem } from "../../shared/design-system/ui/Menu";
-import { PencilSimpleIcon } from "../../shared/design-system/icons";
+import { PlusIcon } from "../../shared/design-system/icons";
 import type { ChannelSummary } from "../relay/contracts";
 import type { RelaySession } from "../relay/session";
 import type { SoloChannelGroupProps } from "./solo-navigation-contract";
@@ -201,7 +201,7 @@ export function RegionChannelGroup(props: SoloChannelGroupProps) {
       data-solo-channel-new-task=""
       aria-label={`New task in ${channel.name}`}
       title="New task"
-      icon={<PencilSimpleIcon size={15} />}
+      icon={<PlusIcon size={15} strokeWidth={2.5} />}
       onClick={newTask}
     />
   );

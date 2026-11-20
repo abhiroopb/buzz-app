@@ -56,11 +56,17 @@
 }
 
 @media (hover: hover) and (pointer: fine) {
+  /* The row keeps the full width: its disclosure and task action sit on it. */
   .teamRow {
     position: relative;
+    grid-template-columns: minmax(0, 1fr);
   }
 
-  .teamRow [data-solo-channel-new-task] {
+  .teamRowSlot > [data-solo-channel-new-task] {
+    position: absolute;
+    z-index: 2;
+    inset-block-start: calc(-1 * var(--space-half));
+    inset-inline-end: 0;
     opacity: 0;
   }
 
@@ -86,6 +92,13 @@
     & [data-solo-channel-new-task],
     & > .teamRowSlot > [data-solo-disclosure] {
       opacity: 1;
+    }
+
+    /* Badges make room for the task action. */
+    &:has(> .teamRowSlot > [data-solo-channel-new-task])
+      > :first-child
+      [data-channel-id] {
+      padding-inline-end: var(--size-control-sm);
     }
   }
 
