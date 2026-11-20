@@ -278,7 +278,7 @@ function ReviewShell({
   error?: string;
   retry?: () => void | Promise<void>;
 }) {
-  const source = session.media(attachment.url);
+  const source = session.media(attachment.url, undefined, channelId);
   // Listener unavailability is not a playback error the selection resets.
   const sourceUnavailable = useMediaElementSource(
     attachment.kind === "video" ? source : undefined,
@@ -585,7 +585,7 @@ function ReviewShell({
           poster={
             (selectionRequest === 0 ? origin?.poster : undefined) ??
             (attachment.previewUrl
-              ? session.media(attachment.previewUrl)
+              ? session.media(attachment.previewUrl, undefined, channelId)
               : undefined)
           }
           initialTime={initialTime}
