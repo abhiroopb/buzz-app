@@ -10,6 +10,7 @@ import { avatarMedia } from "../../shared/avatar-source";
 import { AvatarStack } from "../../shared/design-system/ui/AvatarStack";
 import { Badge } from "../../shared/design-system/ui/Badge";
 import { formatFullTimestamp } from "../../shared/datetime";
+import { useLocalDay } from "../../shared/use-local-day";
 import { CaretRightIcon } from "../../shared/design-system/icons";
 import type { RelayedRun } from "./activity-groups";
 import { MessageTimestamp, useMessageTimeVisible } from "./MessageTimestamp";
@@ -53,6 +54,8 @@ export function RelayedRunPreview({
   const resolveName = useChannelIdentityNames(session, first?.channelId);
   const directory = useReferenceDirectory(session);
   const showTime = useMessageTimeVisible(session?.channels, first?.channelId);
+  // The button's name carries the full date, so it follows time zone changes.
+  useLocalDay();
   useActivityFocusHandoff(container);
   if (!first || !last) return null;
   // The latest sender leads the stack, as it leads the line.

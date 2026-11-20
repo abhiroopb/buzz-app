@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
-import { cleanup, render, screen } from "@testing-library/react";
-import { afterEach, expect, it } from "vitest";
+import { act, cleanup, render, screen } from "@testing-library/react";
+import { memo } from "react";
+import { afterEach, expect, it, vi } from "vitest";
 import { stubAvatarBrowserApis } from "../agents/avatar-testing";
 import type { ChannelMessage, Profile } from "../relay/contracts";
 import type { RelaySession } from "../relay/session";
@@ -9,7 +10,10 @@ import { formatFullTimestamp } from "../../shared/datetime";
 import { RelayedRunPreview } from "./RelayedRunPreview";
 
 stubAvatarBrowserApis();
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+});
 
 const subscribe = () => () => {};
 const profiles = new Map<string, Profile>([
@@ -166,4 +170,49 @@ it("marks a direct message's from, which a narrow conversation keeps", () => {
   expect(
     view.container.querySelector('[data-relayed-from="dm"]'),
   ).toHaveTextContent("from");
+});
+
+it("renames a mounted group's latest date when the time zone changes", async () => {
+  const NativeFormat = Intl.DateTimeFormat;
+  let timeZone = "Europe/London";
+  function dateTimeFormat(
+    locale?: Intl.LocalesArgument,
+    options?: Intl.DateTimeFormatOptions,
+  ) {
+    return new NativeFormat(locale ?? "en-US", { timeZone, ...options });
+  }
+  vi.spyOn(Intl, "DateTimeFormat").mockImplementation(dateTimeFormat);
+  // Memoized, like a timeline row whose parent does not re-render.
+  const Row = memo(function Row() {
+    return (
+      <RelayedRunPreview
+        run={{
+          ids: ["a", "b"],
+          relayed: [
+            relayed("a", "zerk", "One", "source"),
+            relayed("b", "mira", "Two", "source"),
+          ],
+        }}
+        session={session}
+        profiles={profiles}
+        media={() => undefined}
+        expanded={false}
+        onToggle={() => {}}
+        renderHistory={(row) => row.id}
+        onOpenLink={() => false}
+      />
+    );
+  });
+  render(<Row />);
+  const name = () =>
+    screen
+      .getByRole("button", { name: /^Show 2 messages/ })
+      .getAttribute("aria-label");
+  expect(name()).toMatch(/GMT|BST/);
+  await Promise.resolve();
+  timeZone = "America/Los_Angeles";
+  act(() => {
+    document.dispatchEvent(new Event("visibilitychange"));
+  });
+  expect(name()).toMatch(/PDT|PST/);
 });

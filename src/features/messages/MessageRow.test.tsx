@@ -5559,6 +5559,63 @@ it("opens the thread when a file drag rests on its summary, unless already open"
   }
 });
 
+it("renames a mounted relayed line's date when the time zone changes", async () => {
+  const NativeFormat = Intl.DateTimeFormat;
+  let timeZone = "Europe/London";
+  function dateTimeFormat(
+    locale?: Intl.LocalesArgument,
+    options?: Intl.DateTimeFormatOptions,
+  ) {
+    return new NativeFormat(locale ?? "en-US", { timeZone, ...options });
+  }
+  vi.spyOn(Intl, "DateTimeFormat").mockImplementation(dateTimeFormat);
+  const subscribe = () => () => {};
+  const profiles = new Map([["zerk", { name: "Zerk", isAgent: true }]]);
+  const session = {
+    viewer: "owner",
+    channels: {
+      list: () => ({ status: "ready", channels: [] }),
+      subscribeList: subscribe,
+    },
+    messages: {},
+    profiles: { snapshot: () => profiles, subscribe },
+  } as unknown as RelaySession;
+  try {
+    renderDom(
+      <MessageRow
+        row={{
+          ...row,
+          authorId: "owner",
+          replyCount: 0,
+          content: "Rebase on main",
+          relayedFrom: { agent: "zerk", verified: true },
+        }}
+        profile={{ name: "Gil" }}
+        session={session}
+        viewer="owner"
+        media={() => undefined}
+        onOpenLink={() => false}
+        day={false}
+        retry={undefined}
+      />,
+    );
+    const name = () =>
+      screen
+        .getByRole("button", { name: /^Zerk: Rebase on main/ })
+        .getAttribute("aria-label");
+    expect(name()).toMatch(/GMT|BST/);
+    await Promise.resolve();
+    timeZone = "America/Los_Angeles";
+    act(() => {
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    expect(name()).toMatch(/PDT|PST/);
+  } finally {
+    cleanup();
+    vi.restoreAllMocks();
+  }
+});
+
 it("draws a verified relayed message as its agent's quiet line, never the signer's", () => {
   const subscribe = () => () => {};
   const profiles = new Map([
