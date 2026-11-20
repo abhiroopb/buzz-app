@@ -1090,6 +1090,22 @@ it("blocks dismissal throughout credential persistence and clears blocking on fa
   expect(goose.snapshot().blocking).toBe(false);
 });
 
+it("reads the current default provider for forwarding even when the catalog is cached", async () => {
+  const { fake, setup: goose } = setup({
+    providers: [
+      ...PROVIDERS,
+      { providerId: "databricks_v2", providerName: "Databricks AI Gateway" },
+    ],
+  });
+  expect((await goose.providers()).defaults.provider).toBe("ollama");
+  await new GooseSetup(fake).saveDefaults({
+    provider: "databricks_v2",
+    model: "catalog.schema.model",
+  });
+  expect((await goose.providers()).defaults.provider).toBe("ollama");
+  await expect(goose.defaultProvider()).resolves.toBe("databricks_v2");
+});
+
 it("invalidates inherited sessions when a fresh check finds external defaults changes", async () => {
   const fake = fakeSpawn({
     providers: PROVIDERS,

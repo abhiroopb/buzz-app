@@ -306,20 +306,24 @@ export class GooseSetup {
     return { current, models };
   }
 
+  /** A forwarded turn needs the current default, including external edits. */
+  defaultProvider(): Promise<string | undefined> {
+    return this.with(
+      async (goose) => (await readDefaults(goose)).providerId ?? undefined,
+    );
+  }
+
   /** goose's providers, read once until something is saved. */
   providers(): Promise<Providers> {
     this.listing ??= this.with(async (goose) => {
-      const [{ entries }, defaults] = (await Promise.all([
+      const [{ entries }, defaults] = await Promise.all([
         goose.request(
           "_goose/unstable/providers/list",
           { providerIds: [] },
           REQUEST_TIMEOUT_MS,
-        ),
-        goose.request("_goose/unstable/defaults/read", {}, REQUEST_TIMEOUT_MS),
-      ])) as [
-        { entries: Entry[] },
-        { providerId?: string | null; modelId?: string | null },
-      ];
+        ) as Promise<{ entries: Entry[] }>,
+        readDefaults(goose),
+      ]);
       return {
         // Providers that are other agents (`claude-acp`, …) are not offered.
         providers: entries
@@ -706,6 +710,17 @@ export async function briefly<T>(
   } finally {
     await goose.kill();
   }
+}
+
+function readDefaults(goose: GooseProcess) {
+  return goose.request(
+    "_goose/unstable/defaults/read",
+    {},
+    REQUEST_TIMEOUT_MS,
+  ) as Promise<{
+    providerId?: string | null;
+    modelId?: string | null;
+  }>;
 }
 
 function provider(entry: Entry): Provider {

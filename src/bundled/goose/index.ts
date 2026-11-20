@@ -64,7 +64,7 @@ export const apply: PluginModule["apply"] = (ctx) => {
         )
       : undefined,
     // Read at a forwarded turn, after `setup` exists.
-    async () => (await setup.providers()).defaults.provider,
+    () => setup.defaultProvider(),
   );
   const desktop =
     host.spawn && host.resolveDirectory
