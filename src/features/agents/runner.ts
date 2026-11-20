@@ -605,6 +605,7 @@ export type RunnerHost = {
     }>,
     signal: AbortSignal,
     nativePlacement?: true,
+    pinNativePlacement?: () => Promise<void> | undefined,
   ): ReturnType<NonNullable<import("./service").Delivery["routeConversation"]>>;
   protection?(agent: Agent): AgentHandle["protection"];
   agentTypes(): ReturnType<NonNullable<AgentHandle["agentTypes"]>>;
@@ -3270,10 +3271,15 @@ export class AgentRunners {
                   placement,
                   admissionSignal,
                   job.nativePlacement,
+                  routingTrigger.type === "mention"
+                    ? working.pinNativePlacement
+                    : undefined,
                 );
                 if (!route && routingTrigger.type === "mention") {
                   admissionSignal.throwIfAborted();
-                  await working.pinNativePlacement();
+                  // Ordinary turns keep the best-effort recovery write. A
+                  // matching router awaits the pin when it chooses native.
+                  void working.pinNativePlacement();
                   job.nativePlacement = true;
                 }
                 return route;

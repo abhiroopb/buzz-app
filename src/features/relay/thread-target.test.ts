@@ -49,8 +49,9 @@ async function targetRead(
   h: ReturnType<typeof setup>,
   target = reply,
   overlays: RelayEvent[] = [],
+  selection?: Parameters<typeof h.view.refresh>[0],
 ) {
-  const loading = h.view.refresh();
+  const loading = h.view.refresh(selection);
   h.next().respond([target]);
   await flush();
   h.next().respond(overlays);
@@ -469,6 +470,89 @@ it("never retains a selected reply rejected by the shared dual-channel access ga
   h.traffic.receive([root]);
   expect(h.view.snapshot().target).toBeUndefined();
   expect(h.view.snapshot().replies).toEqual([]);
+});
+
+it("reveals an exact descendant beyond the branch window and keeps the composer root", async () => {
+  const parent = message(alice, "a", "Unloaded ancestor", 10001, [
+    ["e", root.id, "", "root"],
+    ["e", reply.id, "", "reply"],
+  ]);
+  const selected = message(alice, "a", "Exact descendant", 10002, [
+    ["e", root.id, "", "root"],
+    ["e", parent.id, "", "reply"],
+  ]);
+  const sibling = message(alice, "a", "Outside the branch", 10003, [
+    ["e", root.id, "", "reply"],
+  ]);
+  const h = setup(reply.id, true);
+  const { loading } = await targetRead(h, reply, [], {
+    messageId: selected.id,
+    sourceThreadId: root.id,
+  });
+  const exact = h.next();
+  exact.respond([selected]);
+  await flush();
+  h.next().respond([]);
+  h.next().respond([parent]);
+  await flush();
+  h.next().respond([root, sibling]);
+  await loading;
+
+  expect(h.view.snapshot()).toMatchObject({
+    root: { id: reply.id },
+    replies: [{ id: selected.id }],
+    target: { id: selected.id },
+    targetStatus: "ready",
+  });
+  const selecting = h.view.retarget(sibling.id, new AbortController().signal);
+  h.next().respond([sibling]);
+  expect(await selecting).toBe("different");
+  expect(h.view.snapshot().target?.id).toBe(selected.id);
+  expect(h.view.snapshot().replies.map((row) => row.id)).toEqual([selected.id]);
+});
+
+it("keeps the verified branch available when its initial selection is a sibling", async () => {
+  const child = message(alice, "a", "Task reply", 10001, [
+    ["e", root.id, "", "root"],
+    ["e", reply.id, "", "reply"],
+  ]);
+  const sibling = message(alice, "a", "Source reply", 10002, [
+    ["e", root.id, "", "reply"],
+  ]);
+  const h = setup(reply.id, true);
+  const { loading } = await targetRead(h, reply, [], {
+    messageId: sibling.id,
+    sourceThreadId: root.id,
+  });
+  h.next().respond([sibling]);
+  h.next().respond([]);
+  await flush();
+  expect(h.view.snapshot().root).toBeUndefined();
+  h.next().respond([root, child, sibling]);
+  await loading;
+  expect(h.view.snapshot()).toMatchObject({
+    root: { id: reply.id },
+    replies: [{ id: child.id }],
+    targetStatus: "unavailable",
+  });
+});
+
+it("does not open a branch anchor signed for another physical thread", async () => {
+  const h = setup(reply.id, true);
+  const loading = h.view.refresh({
+    messageId: reply.id,
+    sourceThreadId: "a".repeat(64),
+  });
+  h.next().respond([reply]);
+  const overlays = h.next();
+  await loading;
+  expect(h.view.snapshot()).toMatchObject({
+    root: undefined,
+    replies: [],
+    targetStatus: "unavailable",
+  });
+  expect(overlays.signal?.aborted).toBe(true);
+  expect(h.pending).toHaveLength(0);
 });
 
 it("retargets a root-opened reader without reloading its history or replacing its rows", async () => {

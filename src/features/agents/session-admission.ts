@@ -160,7 +160,11 @@ export function createSessionAdmissions(root: Context, storage: AgentStore) {
         );
       routers.register(ctx, router);
     },
-    async route(input: AdmissionRequest, nativePlacement?: true) {
+    async route(
+      input: AdmissionRequest,
+      nativePlacement?: true,
+      pinNativePlacement?: () => Promise<void> | undefined,
+    ) {
       check(input.signal);
       const key =
         SESSION_ADMISSION_PREFIX +
@@ -225,7 +229,11 @@ export function createSessionAdmissions(root: Context, storage: AgentStore) {
         (savedRoute.root !== route?.root || savedRoute.parent !== route.parent)
       )
         throw new Error("The invocation subthread cannot change");
-      if (!route) return;
+      if (!route) {
+        await pinNativePlacement?.();
+        check(input.signal);
+        return;
+      }
       const accepted =
         parse<InvocationSubthread | null>(
           await storage.add(key, JSON.stringify(route)),

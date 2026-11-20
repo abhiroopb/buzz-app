@@ -398,7 +398,10 @@ export function PageTabs({
     ...(primaryTarget.threadId
       ? {
           kind: "thread" as const,
-          messageId: primaryTarget.messageId ?? primaryTarget.threadId,
+          messageId:
+            primaryTarget.messageId ??
+            primaryTarget.subthreadId ??
+            primaryTarget.threadId,
           rootId: primaryTarget.threadId,
         }
       : {

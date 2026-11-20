@@ -5,6 +5,7 @@ import { threadReference } from "./thread-reference";
 function descendants(
   parents: readonly { id: string; parent?: string | undefined }[],
   anchor: string,
+  verifiedTarget?: string,
 ) {
   const children = new Map<string, string[]>();
   for (const row of parents) {
@@ -13,7 +14,7 @@ function descendants(
     siblings.push(row.id);
     children.set(row.parent, siblings);
   }
-  const ids = new Set([anchor]);
+  const ids = new Set(verifiedTarget ? [anchor, verifiedTarget] : [anchor]);
   for (const id of ids)
     for (const child of children.get(id) ?? []) ids.add(child);
   return ids;
@@ -66,13 +67,16 @@ export async function readSubthread<
   };
 }
 
+/** The exact reader can prove a target through ancestors outside the loaded rows. */
 export function subthreadMessages(
   rows: readonly ChannelMessage[],
   anchor: string,
+  verifiedTarget?: string,
 ) {
   const ids = descendants(
     rows.map((row) => ({ id: row.id, parent: row.replyParentId })),
     anchor,
+    rows.some((row) => row.id === verifiedTarget) ? verifiedTarget : undefined,
   );
   return rows.filter((row) => ids.has(row.id));
 }

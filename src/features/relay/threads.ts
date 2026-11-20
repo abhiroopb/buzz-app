@@ -1,6 +1,6 @@
 import { ReadError, transientStatus } from "./errors";
 import { isRetryableRead, retryRead } from "./read-retry";
-import { subthreadMessages } from "./subthread";
+import { readSubthread, subthreadMessages } from "./subthread";
 import {
   canonicalChannel,
   MissingThreadBounds,
@@ -101,7 +101,11 @@ export type ThreadRetarget =
 export type ThreadView = {
   snapshot(): ThreadSnapshot;
   subscribe(listener: () => void): () => void;
-  refresh(): Promise<void>;
+  /** Start an opted-in branch with an exact selection and its source root. */
+  refresh(selection?: {
+    messageId: string;
+    sourceThreadId?: string | undefined;
+  }): Promise<void>;
   /** Reads older replies; with `through`, keeps paging in this one read until
    * a reply at or before the time it returns is loaded. */
   loadMore(through?: () => number): Promise<void>;
@@ -167,7 +171,7 @@ export function createThreadView({
   visible(events: readonly RelayEvent[]): readonly RelayEvent[];
   notify(listener: () => void): void;
   exact?: boolean;
-  /** Keep the source reader and project only the selected invocation branch. */
+  /** Project the branch anchored by the opening message. */
   subthread?: boolean;
   /** Admission for every read this view makes. A passive reader, one that
    * only decorates a link, takes `background` so an opened or previewed
@@ -206,6 +210,8 @@ export function createThreadView({
   // Only a view created exact reads through a reader that returns rows
   // unadmitted; a retarget makes a view exact but keeps its reader.
   const unadmitted = exact;
+  const subthreadId = subthread ? messageId : undefined;
+  let branchOpening: Parameters<ThreadView["refresh"]>[0];
   let disposed = false;
   let rootId: string | undefined;
   let rootUnavailable = false;
@@ -237,7 +243,12 @@ export function createThreadView({
   const unverified = () =>
     new Set(
       remote
-        .filter((event) => isReply(event) && !(exact && event.id === messageId))
+        .filter(
+          (event) =>
+            isReply(event) &&
+            event.id !== subthreadId &&
+            !(exact && event.id === messageId),
+        )
         .map((event) => event.id),
     );
   /** The replies held when the stream dropped, or read while it was down,
@@ -444,11 +455,22 @@ export function createThreadView({
           : row;
       }),
     );
-    const rows =
-      subthread && messageId !== rootId
-        ? subthreadMessages(sourceRows, messageId)
-        : sourceRows;
-    const displayedRoot = subthread ? messageId : rootId;
+    const displayedRoot = subthreadId ?? rootId;
+    let rows = sourceRows;
+    if (subthreadId) {
+      if (
+        rootUnavailable ||
+        !sourceRows.some((row) => row.id === rootId) ||
+        !sourceRows.some((row) => row.id === subthreadId)
+      )
+        rows = [];
+      else if (subthreadId !== rootId)
+        rows = subthreadMessages(
+          sourceRows,
+          subthreadId,
+          targetStatus === "ready" ? messageId : undefined,
+        );
+    }
     const target =
       targetStatus === "ready"
         ? rows.find((row) => row.id === messageId)
@@ -556,7 +578,13 @@ export function createThreadView({
     )
       void run(false, false, undefined, true);
   }
-  if (seed && canAccess() && contentKind(seed) && inChannel(seed, channelId)) {
+  if (
+    !subthreadId &&
+    seed &&
+    canAccess() &&
+    contentKind(seed) &&
+    inChannel(seed, channelId)
+  ) {
     rootId = threadReference(seed)?.rootId ?? seed.id;
     if (seed.id === rootId) {
       remote = [seed];
@@ -621,15 +649,17 @@ export function createThreadView({
     id: string,
     owned: AbortController,
     expectedRoot?: string,
+    selecting = false,
   ): Promise<ThreadRetarget> {
+    if (!/^[0-9a-f]{64}$/.test(id)) return "unavailable";
     const active = () =>
       !disposed &&
       !owned.signal.aborted &&
-      (expectedRoot ? selectionController : controller) === owned;
+      (selecting ? selectionController : controller) === owned;
     let pending: readonly RelayEvent[] = [];
     const stage = (events: readonly RelayEvent[]) => {
       pending = events;
-      if (expectedRoot) selectionStaged = events;
+      if (selecting) selectionStaged = events;
       else staged = events;
       return retain(union(remote, staged, selectionStaged), false);
     };
@@ -660,6 +690,24 @@ export function createThreadView({
     // Staging makes live overlay deletions resolvable without exposing an
     // incomplete selected fold. Existing displayed content remains untouched.
     if (!stage([event])) return "error";
+    if (subthreadId && subthreadId !== resolvedRoot && id !== subthreadId) {
+      const branch = await readSubthread(
+        [event],
+        { channel: channelId, root: resolvedRoot, anchor: subthreadId },
+        [9, 40002, 40008],
+        async (filters) =>
+          visible(
+            await targetReader.read(filters, {
+              signal: owned.signal,
+            }),
+          ),
+      );
+      if (!active()) return "cancelled";
+      if (!branch.events.length) {
+        stage([]);
+        return "different";
+      }
+    }
     const overlays = await overlaysRead;
     if (!active()) return "cancelled";
     if (!stage(union(pending, related(overlays, id)))) return "error";
@@ -700,12 +748,12 @@ export function createThreadView({
     }
     // Rejected first-open evidence must never latch a root that later live
     // traffic could populate. Resolve identity only after final admission.
-    if (!expectedRoot) rootId = resolvedRoot;
+    if (!selecting) rootId = resolvedRoot;
     const combined = union(remote, related(accepted, id));
     if (!retain(combined)) return "error";
     stage([]);
     if (
-      expectedRoot &&
+      (selecting || subthreadId) &&
       !foldMessages(channelId, relayAuthor, combined, {
         includeReplies: true,
         signingAuthority,
@@ -734,7 +782,7 @@ export function createThreadView({
     signal.addEventListener("abort", cancel, { once: true });
     selectionController = owned;
     try {
-      const result = await readTarget(id, owned, rootId);
+      const result = await readTarget(id, owned, rootId, true);
       if (disposed || owned.signal.aborted || selectionController !== owned)
         return "cancelled";
       if (result !== "selected") return result;
@@ -815,6 +863,9 @@ export function createThreadView({
     let nextCursor = replace ? undefined : cursor;
     let nextPages = replace ? 0 : pages;
     let fetched: readonly RelayEvent[] = [];
+    let branchSelection:
+      | { revision: number; status: "ready" | "unavailable" }
+      | undefined;
     // Repair retains already-verified presentation; only a new/unavailable
     // selection waits for its initial fold. Never unmount a reader on reconnect.
     if (exact && replace && targetStatus !== "ready") targetStatus = "loading";
@@ -831,19 +882,36 @@ export function createThreadView({
     try {
       if (exact && replace) {
         const revision = selectionRevision;
-        const result = await readTarget(messageId, owned);
+        const selectedId = messageId;
+        const anchor = subthreadId ?? selectedId;
+        const anchorResult = await readTarget(
+          anchor,
+          owned,
+          branchOpening?.sourceThreadId,
+        );
         if (!active()) return;
-        if (revision === selectionRevision && result !== "selected") {
+        if (anchorResult !== "selected" && revision === selectionRevision) {
           targetStatus = "unavailable";
           publish({ status: "ready", canLoadMore: false });
           return;
         }
+        const result =
+          anchorResult === "selected" && anchor !== selectedId
+            ? await readTarget(selectedId, owned, rootId)
+            : anchorResult;
+        if (!active()) return;
         if (revision === selectionRevision) {
-          targetStatus = "ready";
-          publish();
-          if (snapshot.targetStatus !== "ready") {
-            publish({ status: "ready", canLoadMore: false });
-            return;
+          const status = result === "selected" ? "ready" : "unavailable";
+          // A live update can fold while the physical root is still loading.
+          // Resolve the branch selection with the verified source read.
+          if (subthreadId) branchSelection = { revision, status };
+          else {
+            targetStatus = status;
+            publish();
+            if (snapshot.targetStatus !== "ready") {
+              publish({ status: "ready", canLoadMore: false });
+              return;
+            }
           }
         }
       }
@@ -1080,6 +1148,8 @@ export function createThreadView({
       if (replace && !dropped) held = undefined;
       else if (replace && (unreached || !held?.size)) held = unverified();
       if (replace) shown = undefined;
+      if (branchSelection && branchSelection.revision === selectionRevision)
+        targetStatus = branchSelection.status;
       publish({
         status: "ready",
         error: undefined,
@@ -1247,7 +1317,13 @@ export function createThreadView({
         };
       },
       retarget,
-      refresh: () => run(true),
+      refresh(selection) {
+        if (subthreadId && !branchOpening) {
+          branchOpening = selection ?? { messageId };
+          messageId = branchOpening.messageId;
+        }
+        return run(true);
+      },
       loadMore: more,
       dispose() {
         listeners.clear();

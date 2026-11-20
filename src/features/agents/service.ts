@@ -2637,6 +2637,7 @@ export class AgentsService extends Service implements Agents {
         placement,
         signal,
         nativePlacement,
+        pinNativePlacement,
       ) =>
         this.sessionAdmissions.route(
           {
@@ -2651,6 +2652,7 @@ export class AgentsService extends Service implements Agents {
             signal,
           },
           nativePlacement,
+          pinNativePlacement,
         ),
       prepareSession: async (agent, type, trigger, placement, signal) => {
         if (

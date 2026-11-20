@@ -112,7 +112,11 @@ import {
 } from "./catch-up";
 import { CHANNEL_KINDS } from "../relay/live";
 import { fileStore, loadAgentStorage, type AgentStore } from "./state";
-import { readInterrupted, writeInterrupted } from "./interrupted";
+import {
+  INTERRUPTED_PREFIX,
+  readInterrupted,
+  writeInterrupted,
+} from "./interrupted";
 import { saveOwnerSections } from "./prompt-sections";
 import { memoryStorage } from "./test-fakes";
 import { SyncedTeams } from "./team-config";
@@ -10034,6 +10038,52 @@ describe("a turn closing or reloading the app stopped", () => {
     await settle();
     expect(third.run).not.toHaveBeenCalled();
   });
+
+  it.each([false, true])(
+    "requires a durable native fallback only when a routing plugin matches (%s)",
+    async (matches) => {
+      const asked = mention();
+      const store = memoryStorage();
+      const app = await setup({
+        storage: {
+          ...store,
+          async set(key, value) {
+            if (key.startsWith(INTERRUPTED_PREFIX))
+              throw new Error("Disk full");
+            await store.set(key, value);
+          },
+        },
+        identities: [echo],
+        resumes: true,
+      });
+      if (matches)
+        await app.ctx
+          .extend({ pluginOwner: { id: "tasks", revision: "one" } })
+          .plugin((plugin) => {
+            plugin.agents.registerSessionRouter({
+              id: "tasks",
+              ready: async () => {},
+              matches: () => true,
+              route: async () => undefined,
+              prepare: async () => undefined,
+            });
+          })
+          .await();
+      const answered = vi.fn();
+      app.run.mockImplementationOnce(async ({ routeConversation }) => {
+        await routeConversation?.(placementFor(asked));
+        answered();
+      });
+
+      app.emit({ events: [asked], channelId: channel });
+      await vi.waitFor(() =>
+        expect(app.activity.reader.work()[0]?.state).toBe(
+          matches ? "error" : "done",
+        ),
+      );
+      expect(answered).toHaveBeenCalledTimes(matches ? 0 : 1);
+    },
+  );
 
   it.each(["legacy", "native", "pending"] as const)(
     "keeps the %s placement decision through Resume and Retry",

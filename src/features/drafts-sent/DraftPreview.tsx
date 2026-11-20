@@ -248,6 +248,9 @@ export function DraftPreview({
                   : (entry.subthreadId ?? entry.threadRootId)
               }
               subthreadId={entry.subthreadId}
+              sourceThreadId={
+                entry.subthreadId ? entry.threadRootId : undefined
+              }
               revealSelected={mode === "sent"}
               revealFocus={false}
               requireReadyRoot={mode === "draft"}

@@ -83,6 +83,7 @@ export type ThreadPanelProps = {
   messageId: string;
   /** Display and compose only within this invocation's branch. */
   subthreadId?: string | undefined;
+  sourceThreadId?: string | undefined;
   /** Channel workspaces retain the editor across same-thread link navigation. */
   retainThread?: boolean | undefined;
   /** The hosting tab strip owns the title, close and Escape. */
@@ -447,6 +448,7 @@ function OwnedThreadPanel({
   channelId,
   messageId,
   subthreadId,
+  sourceThreadId,
   navigation,
   onOpenLink,
   onOpenMediaReview,
@@ -459,6 +461,7 @@ function OwnedThreadPanel({
   active = true,
   revealSelected,
   revealFocus,
+  revealRequest,
   latestRequest,
   unreadRequest,
   requireReadyRoot,
@@ -479,7 +482,7 @@ function OwnedThreadPanel({
         revealSelected ||
         (navigation?.target.kind === "conversation" &&
           navigation.target.threadRootId !== messageId);
-      const owned = session.thread(channelId, messageId, {
+      const owned = session.thread(channelId, subthreadId ?? messageId, {
         exact,
         reading: true,
         ...(subthreadId ? { subthread: true } : {}),
@@ -491,7 +494,8 @@ function OwnedThreadPanel({
       setError(undefined);
       setView(owned);
       navigation?.signal.addEventListener("abort", cancel, { once: true });
-      void owned.refresh();
+      if (subthreadId) void owned.refresh({ messageId, sourceThreadId });
+      else void owned.refresh();
       return () => {
         navigation?.signal.removeEventListener("abort", cancel);
         owned.dispose();
@@ -509,6 +513,7 @@ function OwnedThreadPanel({
     channelId,
     messageId,
     subthreadId,
+    sourceThreadId,
     attempt,
     navigation,
     revealSelected,
@@ -540,6 +545,7 @@ function OwnedThreadPanel({
       active={active}
       revealSelected={revealSelected}
       revealFocus={revealFocus}
+      revealRequest={subthreadId ? revealRequest : undefined}
       latestRequest={subthreadId ? latestRequest : undefined}
       unreadRequest={unreadRequest}
       requireReadyRoot={requireReadyRoot}
