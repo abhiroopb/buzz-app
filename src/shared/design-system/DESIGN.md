@@ -142,10 +142,15 @@ subtitle; keep it to the value itself, not how it was chosen.
 Use `Accordion` for optional details, retaining mounted draft input where needed.
 Use `Accordion variant="settings"` for disclosures alongside preference rows.
 Inside a row-layout `SettingsGroup`, it shares the group's frame and content inset,
-with square trigger corners so the hover fill follows the flat row dividers.
+with rounded corners at the outside edges and square corners at row dividers.
 The disclosure spans the group's inner width; its trigger and content retain the
 group's horizontal inset, so text has padding inside the hover fill. No divider
 separates the trigger from its expanded content.
+Adjacent disclosure rows use the same inset dividers as preference rows. Their
+hover fill and focus outline have clearance inside the group's frame.
+When an expanded settings disclosure has controls below scrollable text, place
+the controls outside the scroll area. Base instructions uses the same height
+limit for its read-only text and its editable Textarea.
 Standalone triggers use the settings container shape and spacing; the chevron
 is decorative, and the entire row expands the content. `Select variant="preference"` uses the same
 label and compact choice control without adding a group container.

@@ -75,6 +75,20 @@
     border-radius: 0;
   }
   .buzz-settings-group[data-layout="rows"]
+    > .buzz-accordion[data-variant="settings"]:first-child
+    > .buzz-accordion-item:first-child
+    .buzz-accordion-trigger {
+    border-start-start-radius: calc(var(--radius-container) - 1px);
+    border-start-end-radius: calc(var(--radius-container) - 1px);
+  }
+  .buzz-settings-group[data-layout="rows"]
+    > .buzz-accordion[data-variant="settings"]:last-child
+    > .buzz-accordion-item:last-child
+    .buzz-accordion-trigger[aria-expanded="false"] {
+    border-end-start-radius: calc(var(--radius-container) - 1px);
+    border-end-end-radius: calc(var(--radius-container) - 1px);
+  }
+  .buzz-settings-group[data-layout="rows"]
     > .buzz-accordion[data-variant="settings"]
     :is(.buzz-accordion-trigger, .buzz-accordion-content) {
     padding-inline: var(--settings-group-inset);
@@ -83,6 +97,148 @@
     > .buzz-accordion[data-variant="settings"]
     .buzz-accordion-content {
     padding-block-start: 0;
+  }
+  .buzz-settings-group[data-layout="rows"]:has(
+    > .buzz-accordion[data-variant="settings"]
+      + .buzz-accordion[data-variant="settings"]
+  ) {
+    --settings-disclosure-gutter: min(
+      var(--settings-group-inset),
+      var(--space-half)
+    );
+    padding-block: var(--settings-disclosure-gutter);
+
+    > .buzz-accordion[data-variant="settings"] {
+      --settings-disclosure-padding: calc(
+        var(--settings-group-inset) -
+        var(--settings-disclosure-gutter)
+      );
+      margin-inline: 0;
+
+      & + .buzz-accordion[data-variant="settings"] {
+        padding-block-start: var(--space-half);
+      }
+
+      &:has(+ .buzz-accordion[data-variant="settings"]) {
+        padding-block-end: var(--space-half);
+      }
+
+      .buzz-accordion-trigger {
+        inline-size: calc(100% + 2 * var(--settings-disclosure-padding));
+        margin-inline: calc(0px - var(--settings-disclosure-padding));
+        padding-inline: var(--settings-disclosure-padding);
+        border-radius: max(
+          0px,
+          calc(
+            var(--radius-container) -
+            var(--settings-disclosure-gutter) -
+            1px
+          )
+        );
+      }
+
+      .buzz-accordion-trigger:focus-visible {
+        outline-offset: 0;
+      }
+
+      .buzz-accordion-trigger[aria-expanded="true"]:hover {
+        background: transparent;
+      }
+
+      .buzz-accordion-panel {
+        /* Leave room for control focus rings inside the height animation clip. */
+        margin-inline: calc(0px - var(--space-2));
+        padding-inline: var(--space-2);
+      }
+
+      .buzz-accordion-content {
+        padding-inline: 0;
+      }
+
+      &[data-expanded-fill] {
+        --settings-accordion-content-max-height: min(16rem, 32dvh);
+
+        @media (prefers-reduced-motion: no-preference) {
+          :where(html:not([data-keyboard-input], [data-keyboard-navigation]))
+            & {
+            & + .buzz-accordion[data-expanded-fill] {
+              transition: border-block-start-color var(--duration-state)
+                var(--easing-enter);
+            }
+
+            .buzz-accordion-item::before {
+              transition-property: inset-inline, opacity, translate;
+              transition-duration: var(--duration-settle);
+              transition-timing-function: var(--easing-settle);
+            }
+          }
+        }
+
+        &
+          + .buzz-accordion[data-expanded-fill]:has(
+            > .buzz-accordion-item[data-open]
+          ),
+        &:has(> .buzz-accordion-item[data-open])
+          + .buzz-accordion[data-expanded-fill] {
+          border-block-start-color: transparent;
+        }
+
+        .buzz-accordion-item {
+          display: flow-root;
+          position: relative;
+          isolation: isolate;
+        }
+
+        .buzz-accordion-item::before {
+          content: "";
+          position: absolute;
+          z-index: -1;
+          /* Cover the adjacent divider or group edge, leaving one row gutter. */
+          inset-block: calc(0px - var(--settings-disclosure-gutter) - 1px);
+          inset-inline: calc(0px - var(--settings-disclosure-padding));
+          opacity: 0;
+          translate: 0 var(--space-1);
+          border: 1px solid var(--border-standard);
+          border-radius: var(--radius-container);
+          background: var(--affordance-subtle-hover);
+          box-shadow: var(--shadow-sm);
+          pointer-events: none;
+        }
+
+        .buzz-accordion-item[data-open]::before {
+          inset-inline: calc(
+            0px -
+            var(--settings-disclosure-padding) -
+            var(--space-4)
+          );
+          opacity: 1;
+          translate: 0;
+        }
+
+        .buzz-accordion-panel {
+          transition-property: height, margin-block-end;
+        }
+
+        .buzz-accordion-panel[data-open]:not([data-starting-style]) {
+          /* Let the scroll fade meet the inside edge of the expanded border. */
+          margin-block-end: calc(0px - var(--settings-disclosure-gutter));
+        }
+
+        .buzz-accordion-scroll {
+          max-block-size: var(--settings-accordion-content-max-height);
+          margin-inline: calc(0px - var(--space-2));
+          padding-inline: var(--space-2);
+          overflow-y: auto;
+        }
+
+        :where(html[data-keyboard-navigation])
+          &
+          .buzz-accordion-scroll:focus-visible {
+          outline: 2px solid var(--border-focus);
+          outline-offset: -2px;
+        }
+      }
+    }
   }
   .buzz-settings-group[data-layout="form"] {
     display: grid;

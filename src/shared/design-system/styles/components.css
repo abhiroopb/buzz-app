@@ -1122,7 +1122,8 @@
      cutting content at a hard line. `always` feathers both edges, as message
      history does; `scrolled` feathers only an edge with content past it, so a
      list at rest keeps its first row crisp. Set `data-scroll-fade` on the
-     scroller; `scrolled` also needs `useScrollEdges("block")` on it. A host
+     scroller; `end` limits the fade to the bottom edge. Both conditional modes
+     need `useScrollEdges("block")`. A host
      that cannot mark its scroller applies `--scroll-fade-always` itself. */
   :root {
     --scroll-fade: var(--space-4);
@@ -1158,7 +1159,8 @@
   [data-scroll-fade="scrolled"][data-overflow-start]:not([data-overflow-end]) {
     mask-image: var(--scroll-fade-start);
   }
-  [data-scroll-fade="scrolled"][data-overflow-end]:not([data-overflow-start]) {
+  [data-scroll-fade="scrolled"][data-overflow-end]:not([data-overflow-start]),
+  [data-scroll-fade="end"][data-overflow-end] {
     mask-image: var(--scroll-fade-end);
   }
 
