@@ -1279,7 +1279,7 @@ describe("GooseRuntime", () => {
     });
   });
 
-  it("records no one-off session, nor its timer, while Usage is off, and removes what was kept past keeping", async () => {
+  it("records a one-off session but not its timer while Usage is off, and removes what was kept past keeping", async () => {
     const items = new Map<string, string>();
     const agentStore = localStore({
       get length() {
@@ -1300,9 +1300,12 @@ describe("GooseRuntime", () => {
     await flush(100);
     const [start] = runtime.prompts(self).sessions();
     expect(start).toBeDefined();
+    // Its id and start are kept, as for any one-off turn, but not its key.
     expect(
-      [...items.keys()].filter((key) => key.startsWith(STANDALONE_PREFIX)),
-    ).toEqual([]);
+      [...items.keys()]
+        .filter((key) => key.startsWith(STANDALONE_PREFIX))
+        .flatMap((key) => JSON.parse(items.get(key) ?? "").sessions),
+    ).toEqual([[start?.id, expect.any(Number)]]);
     const usage = {
       id: start?.id ?? "",
       revision: "r",

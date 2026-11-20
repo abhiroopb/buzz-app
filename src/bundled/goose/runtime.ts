@@ -212,7 +212,7 @@ export class GooseRuntime {
    * goose's provider key. */
   explain: (error: string) => string = (error) => error;
   /** Whether the Usage plugin is on, asked as each one-off turn starts: only
-   * then is its session kept for Usage, with the key of the turn. */
+   * then is the turn's key kept with its session, for Usage. */
   usageOn: () => boolean = () => false;
 
   constructor(
@@ -1252,13 +1252,13 @@ export class GooseRuntime {
           title: title ?? "",
           conversation: conversation ?? null,
         });
-        // Kept apart from the saved prompts, which drop old sessions.
-        if (wake) {
-          const record = standaloneSessions(this.agentStore, "goose", agent);
-          if (this.usageOn()) void record.add(session, wake);
-          // What was kept goes once past keeping, Usage on or off.
-          void record.expire();
-        }
+        // Kept apart from the saved prompts, which drop old sessions; its
+        // key is kept only while Usage is on.
+        if (wake)
+          void standaloneSessions(this.agentStore, "goose", agent).add(
+            session,
+            this.usageOn() ? wake : undefined,
+          );
       },
       tags: (conversation) => sessionTags(agent, conversation),
       onChange: () => this.notify(),

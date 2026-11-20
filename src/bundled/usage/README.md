@@ -2,7 +2,9 @@
 
 Estimates what your agents' Claude Code, Codex and goose sessions on this computer cost, from each harness's own session files: the cost a harness records, or else its token counts at each provider's published API prices, from [genai-prices](https://github.com/pydantic/genai-prices). It is a best-effort estimate, not your bill.
 
-A timer's or watch's turn leaves no conversation behind, so while Usage is on, this app keeps a record of the session each one starts, and which timer or watch it was. Turns run while Usage is off are not recorded. Most are not counted; goose turns that still appear in goose's own session history are counted, but without their timer or watch.
+A timer's or watch's turn leaves no conversation behind, so this app keeps a record of the session each one starts: its id and start time only, Usage on or off. While Usage is on, it also keeps which timer or watch it was, for **By routine**. Turns run while Usage was off are counted in the totals, and under Other in **By routine**, which shows only once a session in the period has its timer or watch.
+
+An agent set to one session per community runs its timers and watches in that shared session, so **By routine** shows their cost under Other. The total is still right.
 
 ## Getting started
 

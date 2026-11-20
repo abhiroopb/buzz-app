@@ -356,7 +356,7 @@ export class ClaudeRuntime {
    * Claude's credentials. */
   explain: (error: string) => string = (error) => error;
   /** Whether the Usage plugin is on, asked as each one-off turn starts: only
-   * then is its session kept for Usage, with the key of the turn. */
+   * then is the turn's key kept with its session, for Usage. */
   usageOn: () => boolean = () => false;
 
   private executionKey(agent: AgentKey, conversation: string) {
@@ -2181,12 +2181,12 @@ export class ClaudeRuntime {
         );
         // Its transcript names no conversation, so only this says it is the
         // agent's, for its usage; the saved prompts drop old sessions.
-        if (once) {
-          const record = standaloneSessions(this.storage, "claude-code", agent);
-          if (this.usageOn()) void record.add(session, once);
-          // What was kept goes once past keeping, Usage on or off.
-          void record.expire();
-        }
+        // Its key is kept only while Usage is on.
+        if (once)
+          void standaloneSessions(this.storage, "claude-code", agent).add(
+            session,
+            this.usageOn() ? once : undefined,
+          );
       },
       onChange: () => this.notify(),
       fingerprint: (key) =>

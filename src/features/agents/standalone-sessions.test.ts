@@ -71,13 +71,9 @@ it("keeps a session for as long as Usage reads back, then drops its day", async 
   expect(sessions.list()).toEqual([]);
   // Its day's value stays until all of that day is past keeping.
   await sessions.add("late");
-  await sessions.expire();
   expect(storage.get(`${STANDALONE_PREFIX}pi:${AGENT}:0`)).not.toBeNull();
   now = (STANDALONE_DAYS + 1) * DAY;
   await sessions.add("new");
-  // Adding keeps it; only expiring removes it.
-  expect(storage.get(`${STANDALONE_PREFIX}pi:${AGENT}:0`)).not.toBeNull();
-  await sessions.expire();
   expect(storage.get(`${STANDALONE_PREFIX}pi:${AGENT}:0`)).toBeNull();
   expect(
     JSON.parse(
@@ -86,19 +82,6 @@ it("keeps a session for as long as Usage reads back, then drops its day", async 
     ),
   ).toEqual({ version: 1, sessions: [["new", now]] });
   expect(sessions.list().map(({ id }) => id)).toEqual(["late", "new"]);
-});
-
-it("expires the agent's days past keeping with nothing added", async () => {
-  const storage = memory();
-  let now = 0;
-  await standaloneSessions(storage, "pi", AGENT, () => now).add("a");
-  await standaloneSessions(storage, "pi", OTHER, () => now).add("o");
-  now = (STANDALONE_DAYS + 1) * DAY;
-  // As while Usage is off: no turn is recorded, and what is past still goes.
-  await standaloneSessions(storage, "pi", AGENT, () => now).expire();
-  expect(
-    storage.keys().filter((key) => key.startsWith(STANDALONE_PREFIX)),
-  ).toEqual([`${STANDALONE_PREFIX}pi:${OTHER}:0`]);
 });
 
 it("keeps every session in the window, however often turns run", async () => {
@@ -233,23 +216,29 @@ it("keeps the key of the turn that started a session, alongside ones without", a
   ]);
 });
 
-it("drops a session whose saved turn key is damaged", () => {
+it("keeps a session whose saved turn key is damaged, without its key", async () => {
   const storage = memory();
-  void storage.set(
-    `${STANDALONE_PREFIX}goose:${AGENT}:${Math.floor(Date.now() / DAY)}`,
-    JSON.stringify({
-      version: 1,
-      sessions: [
-        ["good", Date.now(), "watch/pr"],
-        ["number", Date.now(), 7],
-        ["long", Date.now(), "x".repeat(300)],
-        ["extra", Date.now(), "timer/a", "more"],
-      ],
-    }),
-  );
-  expect(
-    standaloneSessions(storage, "goose", AGENT)
-      .list()
-      .map(({ id }) => id),
-  ).toEqual(["good"]);
+  const at = Date.now();
+  const key = `${STANDALONE_PREFIX}goose:${AGENT}:${Math.floor(at / DAY)}`;
+  const saved = [
+    ["good", at, "watch/pr"],
+    ["number", at + 1, 7],
+    ["long", at + 2, "x".repeat(300)],
+    ["extra", at + 3, "timer/a", "more"],
+  ];
+  await storage.set(key, JSON.stringify({ version: 1, sessions: saved }));
+  const sessions = standaloneSessions(storage, "goose", AGENT, () => at + 4);
+  // Each still counts; a key that is not a short string reads as none.
+  expect(sessions.list()).toEqual([
+    { id: "good", at, wake: "watch/pr" },
+    { id: "number", at: at + 1 },
+    { id: "long", at: at + 2 },
+    { id: "extra", at: at + 3, wake: "timer/a" },
+  ]);
+  // A later turn rewrites the day with every entry as it was saved.
+  await sessions.add("next");
+  expect(JSON.parse(storage.get(key) ?? "").sessions).toEqual([
+    ...saved,
+    ["next", at + 4],
+  ]);
 });

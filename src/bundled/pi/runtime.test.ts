@@ -2324,14 +2324,16 @@ it("reads a standalone turn's conversation as the agent's usage, with no channel
   expect(sessions[0]?.observations).toHaveLength(1);
 });
 
-it("records no standalone turn's conversation while Usage is off", async () => {
-  expect(
-    await standaloneUsage(
-      (started) => started,
-      () => 0,
-      false,
-    ),
-  ).toEqual([]);
+it("reads a standalone turn run while Usage was off as the agent's, without its timer", async () => {
+  // Kept as on main, so once Usage is on, it counts the turn, under no routine.
+  const sessions = await standaloneUsage(
+    (started) => started,
+    () => 0,
+    false,
+  );
+  expect(sessions.map((session) => session.id)).toEqual(["99"]);
+  expect(sessions[0]).not.toHaveProperty("wake");
+  expect(sessions[0]?.observations).toHaveLength(1);
 });
 
 it("removes what was kept past keeping at a standalone turn while Usage is off", async () => {
@@ -2346,11 +2348,16 @@ it("removes what was kept past keeping at a standalone turn while Usage is off",
   );
   runtime.sync([{ key: self, pubkey: self, config: DEFAULT_CONFIG }] as never);
   await runOnce("timer/t1", "Run t1");
+  // The old day goes; this turn is kept, without its timer.
   await vi.waitFor(() =>
     expect(
-      kept.keys().filter((key) => key.startsWith(STANDALONE_PREFIX)),
-    ).toEqual([]),
+      kept
+        .keys()
+        .filter((key) => key.startsWith(STANDALONE_PREFIX))
+        .flatMap((key) => JSON.parse(kept.get(key) ?? "").sessions),
+    ).toEqual([["99", expect.any(Number)]]),
   );
+  expect(kept.get(old)).toBeNull();
 });
 
 it("reads a standalone turn begun before the cutoff by when it answered", async () => {

@@ -2917,21 +2917,55 @@ it("runs a timer as a one-off turn that is never saved", async () => {
   expect(runtime.sessions(self)).toEqual([]);
 });
 
-it("records no one-off turn's session, nor its timer, while Usage is off, and removes what was kept past keeping", async () => {
+it("records a one-off turn's session but not its timer while Usage is off, and counts it once Usage is on", async () => {
   const { deliver, claudes, runtime, storage } = setup();
   await standaloneSessions(storage, "claude-code", self, () => 0).add(
     "old",
     "timer/daily",
   );
+  const sessionOf = (index: number) => {
+    const args =
+      claudes().filter((process) => process.prompts.length)[index]?.options
+        .args ?? [];
+    return args[args.indexOf("--session-id") + 1] ?? "";
+  };
   await deliver(timer("daily", "ops"));
   await flush(10);
-  expect(claudes().some((process) => process.prompts.length)).toBe(true);
+  const off = sessionOf(0);
+  expect(off).toBeTruthy();
+  // Its session is the agent's, as on main; what was past keeping is gone.
   expect(runtime.sessionPlaces(self, "~/.buzz")).toEqual([
-    { place: "~/.buzz", saved: [], standalone: [] },
+    { place: "~/.buzz", saved: [], standalone: [off] },
   ]);
-  expect(
-    storage.keys().filter((key) => key.startsWith(STANDALONE_PREFIX)),
-  ).toEqual([]);
+  const kept = storage
+    .keys()
+    .filter((key) => key.startsWith(STANDALONE_PREFIX))
+    .flatMap((key) => JSON.parse(storage.get(key) ?? "").sessions);
+  expect(kept).toEqual([[off, expect.any(Number)]]);
+  // Turned on, Usage counts the earlier turn, under no routine, and keeps
+  // the key of each turn from then on.
+  runtime.usageOn = () => true;
+  await deliver(timer("weekly", "ops"));
+  await flush(10);
+  const on = sessionOf(1);
+  expect(on).toBeTruthy();
+  expect(runtime.sessionPlaces(self, "~/.buzz")).toEqual([
+    { place: "~/.buzz", saved: [], standalone: [off, on] },
+  ]);
+  const usage = (id: string) => ({
+    id,
+    revision: id,
+    gaps: [],
+    startedAt: 1,
+    lastAt: 2,
+    observations: [],
+  });
+  await expect(
+    runtime.withWakes(self, [usage(off), usage(on)]),
+  ).resolves.toEqual([
+    usage(off),
+    { ...usage(on), wake: "timer/weekly", revision: expect.any(String) },
+  ]);
 });
 
 it("records a one-off turn's session as the agent's, for its usage", async () => {

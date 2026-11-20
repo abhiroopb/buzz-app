@@ -472,6 +472,48 @@ it("keeps each agent's routines apart when two agents name a timer alike", () =>
   ]);
 });
 
+it("counts a community-session agent's timers and watches under Other, with the total still right", () => {
+  const pixel = agent("pixel");
+  const shared = agent("shared");
+  const at = (hour: number, usd: number) =>
+    seen(today + hour * HOUR, full(1), "acme-1", usd);
+  const result = stats(
+    [
+      {
+        agent: pixel,
+        harness: "x/claude",
+        sessions: [session("a", [at(9, 2)], { wake: "timer/daily" })],
+      },
+      {
+        // One session per community: its timer and watch turns run in the
+        // shared session, among its conversations, so none says which started.
+        agent: shared,
+        harness: "x/pi",
+        sessions: [session("community", [at(9, 4), at(10, 5), at(11, 1)])],
+      },
+    ],
+    now,
+    7,
+  );
+  expect(result.routines).toEqual([
+    {
+      agent: pixel,
+      wake: "timer/daily",
+      cost: { value: 2, partial: false },
+      sessions: 1,
+    },
+    { cost: { value: 10, partial: false }, sessions: 1 },
+  ]);
+  expect(result.cost.value).toBe(12);
+  expect(
+    result.routines.reduce((sum, { cost }) => sum + (cost.value ?? 0), 0),
+  ).toBe(result.cost.value);
+  expect(result.agents.map(({ agent, cost }) => [agent, cost.value])).toEqual([
+    [shared, 10],
+    [pixel, 2],
+  ]);
+});
+
 it("shows no routines when no session says which timer or watch started it", () => {
   const result = stats(
     [

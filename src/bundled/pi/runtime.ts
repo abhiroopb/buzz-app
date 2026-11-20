@@ -234,7 +234,7 @@ export class PiRuntime {
   /** Each agent's working conversations, as last read, for a stable view. */
   private readonly views = new Map<AgentKey, readonly number[]>();
   /** Whether the Usage plugin is on, asked as each one-off turn starts: only
-   * then is its conversation kept for Usage, with the key of the turn. */
+   * then is the turn's key kept with its conversation, for Usage. */
   usageOn: () => boolean = () => false;
   /** The agents of this type that run here now. */
   private running = new Set<AgentKey>();
@@ -1105,11 +1105,12 @@ export class PiRuntime {
         );
         this.notify();
       } else {
-        // Outside any conversation, so no place lists it for its usage.
-        const record = standaloneSessions(this.storage, "pi", agent.key);
-        if (this.usageOn()) void record.add(String(conversation), key);
-        // What was kept goes once past keeping, Usage on or off.
-        void record.expire();
+        // Outside any conversation, so no place lists it for its usage. Its
+        // key is kept only while Usage is on.
+        void standaloneSessions(this.storage, "pi", agent.key).add(
+          String(conversation),
+          this.usageOn() ? key : undefined,
+        );
       }
       // A removed agent's storage is closed, and stays so.
       stop = () => {
