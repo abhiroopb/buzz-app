@@ -53,10 +53,6 @@ const uses = (invite: InviteSummary) =>
     ? `${invite.use_count} ${invite.use_count === 1 ? "use" : "uses"}`
     : `${invite.use_count} of ${invite.max_uses} uses`;
 
-/** Whether `a` sorts before `b` in the relay's newest-first order. */
-const newer = (a: InviteSummary, b: InviteSummary) =>
-  a.created_at !== b.created_at ? a.created_at > b.created_at : a.id > b.id;
-
 /** The community's invite links, with revoking by row or by pasted link. */
 export function InviteLinks({
   community,
@@ -88,6 +84,8 @@ export function InviteLinks({
   // Confirmed revocations by id; they win over any list read that raced them.
   const [revoked, setRevoked] = useState<Record<string, number>>({});
   const reads = useRef(0);
+  // Pages on screen, so a refresh re-reads the same range.
+  const loaded = useRef(0);
   const listRef = useRef<HTMLUListElement>(null);
   // A revoked row loses its Revoke button, so focus moves to the list instead.
   const [focusList, setFocusList] = useState(0);
@@ -101,24 +99,26 @@ export function InviteLinks({
       setLoading(true);
       setError("");
       try {
-        const page = await listInvites(community, before);
-        if (read !== reads.current) return;
+        // Show more appends one page; a refresh re-reads every page already
+        // loaded along the relay's cursors, and replaces the list only once all succeed.
+        const pages = before ? 1 : Math.max(1, loaded.current);
+        const rows: InviteSummary[] = [];
+        let cursor = before;
+        let next: string | null = null;
+        let fetched = 0;
+        do {
+          const page = await listInvites(community, cursor);
+          if (read !== reads.current) return;
+          rows.push(...page.invites);
+          next = page.next_before;
+          cursor = next ?? undefined;
+        } while (++fetched < pages && next);
+        loaded.current = (before ? loaded.current : 0) + fetched;
         setList((shown) => {
-          if (before)
-            return {
-              invites: [...(shown?.invites ?? []), ...page.invites],
-              next: page.next_before,
-            };
-          // A refresh replaces the first page and keeps any older pages shown.
-          const last = page.invites.at(-1);
-          const older =
-            page.next_before && last
-              ? (shown?.invites ?? []).filter((invite) => newer(last, invite))
-              : [];
-          return {
-            invites: [...page.invites, ...older],
-            next: older.length ? (shown?.next ?? null) : page.next_before,
-          };
+          const invites = before ? [...(shown?.invites ?? []), ...rows] : rows;
+          // One row per id, even if a link moved across a page boundary.
+          const byId = new Map(invites.map((invite) => [invite.id, invite]));
+          return { invites: [...byId.values()], next };
         });
       } catch (reason) {
         if (read === reads.current) setError(message(reason));
