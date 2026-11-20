@@ -140,9 +140,14 @@ const refused = (provider = "") =>
 
 const TEST_PROMPT = "Reply with exactly: OK";
 const TEST_TIMEOUT_MS = 60_000;
+/** How long a forwarded turn reuses goose's default provider. */
+const DEFAULT_PROVIDER_TTL_MS = 60 * 60_000;
 
 export class GooseSetup {
   private listing: Promise<Providers> | undefined;
+  private current:
+    | { readonly at: number; readonly read: Promise<string | undefined> }
+    | undefined;
   private readonly live = new Map<string, Promise<readonly ModelChoice[]>>();
   private readonly thinking = new Map<string, Promise<Efforts>>();
 
@@ -173,6 +178,7 @@ export class GooseSetup {
   check = (): Promise<void> => {
     if (this.checking) return this.checking;
     this.listing = undefined;
+    this.current = undefined;
     this.live.clear();
     this.thinking.clear();
     this.update({ readiness: "checking" });
@@ -306,11 +312,23 @@ export class GooseSetup {
     return { current, models };
   }
 
-  /** A forwarded turn needs the current default, including external edits. */
+  /** A forwarded turn's default provider: one read, shared by concurrent
+   * turns, until a save or check or after an hour, which covers external edits. */
   defaultProvider(): Promise<string | undefined> {
-    return this.with(
-      async (goose) => (await readDefaults(goose)).providerId ?? undefined,
-    );
+    const now = Date.now();
+    if (this.current && now - this.current.at < DEFAULT_PROVIDER_TTL_MS)
+      return this.current.read;
+    const current = {
+      at: now,
+      read: this.with(
+        async (goose) => (await readDefaults(goose)).providerId ?? undefined,
+      ),
+    };
+    this.current = current;
+    current.read.catch(() => {
+      if (this.current === current) this.current = undefined;
+    });
+    return current.read;
   }
 
   /** goose's providers, read once until something is saved. */
@@ -614,6 +632,7 @@ export class GooseSetup {
       }),
     );
     this.listing = undefined;
+    this.current = undefined;
     this.live.delete(id);
     this.thinking.clear();
   }
