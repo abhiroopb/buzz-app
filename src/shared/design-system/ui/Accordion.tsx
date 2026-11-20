@@ -4,18 +4,20 @@ import type { ReactNode } from "react";
 import { motion, useReducedMotion } from "motion/react";
 import { useScrollEdges } from "./useScrollEdges";
 
-/** A bounded reading area within a Settings disclosure. Place actions after it. */
+/** A bounded reading area within a disclosure. Place actions after it. */
 export function AccordionScrollContent({ children }: { children: ReactNode }) {
   const edges = useScrollEdges("block");
   return (
-    <div
-      ref={edges}
-      className="buzz-accordion-scroll"
-      data-scroll-fade="end"
-      // biome-ignore lint/a11y/noNoninteractiveTabindex: Plain-text content needs a keyboard scroll target.
-      tabIndex={0}
-    >
-      <div>{children}</div>
+    <div className="buzz-accordion-scroll-frame">
+      <div
+        ref={edges}
+        className="buzz-accordion-scroll"
+        data-scroll-fade="end"
+        // biome-ignore lint/a11y/noNoninteractiveTabindex: Plain-text content needs a keyboard scroll target.
+        tabIndex={0}
+      >
+        <div>{children}</div>
+      </div>
     </div>
   );
 }
@@ -30,11 +32,11 @@ export function Accordion({
   headingLevel = 3,
   keepMounted = false,
   animate = false,
-  expandedFill = false,
 }: {
   items: readonly {
     value: string;
     title: ReactNode;
+    triggerLabel?: string | undefined;
     triggerDescription?: string | undefined;
     content: ReactNode;
   }[];
@@ -45,6 +47,7 @@ export function Accordion({
     | "default"
     | "form"
     | "settings"
+    | "popout"
     | "navigation"
     | "activity"
     | "section";
@@ -53,8 +56,6 @@ export function Accordion({
   keepMounted?: boolean;
   /** Animate supporting detail panels; keyboard and reduced motion stay immediate. */
   animate?: boolean;
-  /** Give expanded Settings rows a wider card inside a row-layout SettingsGroup. */
-  expandedFill?: boolean;
 }) {
   const reducedMotion = useReducedMotion();
   return (
@@ -63,7 +64,6 @@ export function Accordion({
       className="buzz-accordion"
       data-variant={variant}
       data-animate={animate || undefined}
-      data-expanded-fill={(variant === "settings" && expandedFill) || undefined}
       defaultValue={defaultValue}
       value={value}
       onValueChange={onValueChange}
@@ -88,7 +88,10 @@ export function Accordion({
           >
             <BaseAccordion.Trigger
               className={`buzz-accordion-trigger ${variant === "section" ? "text-label-sm" : "text-body"}`}
-              aria-label={variant === "settings" ? item.value : undefined}
+              aria-label={
+                item.triggerLabel ??
+                (variant === "settings" ? item.value : undefined)
+              }
               aria-description={item.triggerDescription}
             >
               <span>{item.title}</span>
@@ -106,7 +109,7 @@ export function Accordion({
                       reducedMotion ||
                       (typeof document !== "undefined" &&
                         document.documentElement.matches(
-                          expandedFill && variant === "settings"
+                          variant === "popout"
                             ? "[data-keyboard-input], [data-keyboard-navigation]"
                             : "[data-keyboard-navigation]",
                         ));
@@ -128,7 +131,7 @@ export function Accordion({
                 : undefined
             }
           >
-            {variant === "settings" || animate ? (
+            {variant === "settings" || variant === "popout" || animate ? (
               <div className="buzz-accordion-content">{item.content}</div>
             ) : (
               item.content

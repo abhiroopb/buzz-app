@@ -2683,18 +2683,57 @@ export const COMPONENT_SPECIMENS: Record<string, () => ReactNode> = {
       />
     </SpecimenFrame>,
     <SpecimenGroup
+      key="popout"
+      label="Popout accordion in a long list"
+      code={`<Accordion variant="popout" items={handbookSections} />`}
+    >
+      <section
+        aria-label="Popout accordion in a long list"
+        className="mx-auto w-full max-w-lg"
+      >
+        <Accordion
+          variant="popout"
+          items={(
+            [
+              ["Location", "The workshop takes place in the studio."],
+              ["Arrival", "Check in with the welcome desk from 9 a.m."],
+              ["Agenda", "Bring a draft to discuss in the first session."],
+              [
+                "Materials",
+                "Download workshop-materials-and-accessibility-preparation-guide-for-first-time-attendees.pdf before you arrive.",
+              ],
+              ["Access", "The main entrance and studio are step-free."],
+              ["Breaks", "Breaks begin at 11 a.m. and 2 p.m."],
+              ["Lunch", "The café has vegetarian and gluten-free options."],
+              ["Wi-Fi", "Collect the guest network details at check-in."],
+              ["Recording", "The recap includes slides and shared notes."],
+              [
+                "Questions",
+                "Leave questions in the workbook during each session.",
+              ],
+              ["Feedback", "The closing session includes time for feedback."],
+              ["Follow-up", "The recap will be sent the next day."],
+            ] as const
+          ).map(([title, text]) => ({
+            value: title,
+            title,
+            content: <p className="m-0 text-body-sm">{text}</p>,
+          }))}
+        />
+      </section>
+    </SpecimenGroup>,
+    <SpecimenGroup
       key="expanded-settings"
-      label="Settings disclosures with an expanded card"
+      label="Popout accordion in Settings"
       code={`<SettingsGroup>
   <Accordion
-    variant="settings"
-    expandedFill
+    variant="popout"
     items={[
       {
         value: "Publishing",
         title: "Publishing",
         content: (
-          <div className="grid gap-3 pb-3">
+          <div className="grid gap-3">
             <AccordionScrollContent>
               <p>Publishing instructions go here.</p>
             </AccordionScrollContent>
@@ -2709,19 +2748,18 @@ export const COMPONENT_SPECIMENS: Record<string, () => ReactNode> = {
 </SettingsGroup>`}
     >
       <section
-        aria-label="Settings disclosures with an expanded card"
+        aria-label="Popout accordion in Settings"
         className="mx-auto w-full max-w-lg"
       >
         <SettingsGroup>
           <Accordion
-            variant="settings"
-            expandedFill
+            variant="popout"
             items={[
               {
                 value: "Response style",
                 title: "Response style",
                 content: (
-                  <p className="m-0 pb-3 text-body-sm">
+                  <p className="m-0 text-body-sm">
                     Use plain language and lead with the result.
                   </p>
                 ),
@@ -2731,7 +2769,7 @@ export const COMPONENT_SPECIMENS: Record<string, () => ReactNode> = {
                 title: "Publishing",
                 triggerDescription: "Default instructions",
                 content: (
-                  <div className="grid min-w-0 gap-3 pb-3">
+                  <div className="grid min-w-0 gap-3">
                     <AccordionScrollContent>
                       <div className="grid gap-4 text-body-sm">
                         <p className="m-0">

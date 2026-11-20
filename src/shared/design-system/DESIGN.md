@@ -146,14 +146,14 @@ with square trigger corners so the hover fill follows the flat row dividers.
 The disclosure spans the group's inner width; its trigger and content retain the
 group's horizontal inset, so text has padding inside the hover fill. No divider
 separates the trigger from its expanded content.
-Use `expandedFill` on a Settings accordion inside a row-layout SettingsGroup
-when an open row needs a distinct reading or editing surface. The card extends
-into the surrounding gutter and supplies the border between adjoining disclosure
-rows. Leave room for the wider card at the group's edges. For long text, use
-`AccordionScrollContent` with either Settings treatment and place actions after
-the scroll area so they stay reachable. To match an editor's height limit,
-set `--settings-accordion-content-max-height` on their shared parent and use
-that value for the editor too.
+Use `Accordion variant="popout"` when the open row should widen
+beyond its neighbors to give reading or editing content more room. The collapsed rows keep their
+compact layout. The open card supplies the border between adjoining disclosure
+rows. Use it on its own or directly inside a row-layout SettingsGroup. In a
+SettingsGroup, leave space around the group for the card to extend into.
+Use `AccordionScrollContent` for a long panel body, with actions placed after
+the scroll area. Set `--accordion-content-max-height` on a shared parent to
+match the text limit to an editor.
 Standalone triggers use the settings container shape and spacing; the chevron
 is decorative, and the entire row expands the content. `Select variant="preference"` uses the same
 label and compact choice control without adding a group container.

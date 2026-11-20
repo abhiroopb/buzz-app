@@ -8,13 +8,90 @@ const expectKeyboardRing = async (control: Locator, offset = "2px") => {
   await expect(control).toHaveCSS("outline-offset", offset);
 };
 
+const divider = (row: Locator) =>
+  row.evaluate((node) => {
+    const style = getComputedStyle(node, "::after");
+    const bounds = node.getBoundingClientRect();
+    const label = node
+      .querySelector(".buzz-accordion-trigger > span")
+      ?.getBoundingClientRect();
+    const start = Number.parseFloat(style.insetInlineStart);
+    const end = Number.parseFloat(style.insetInlineEnd);
+    return {
+      visible:
+        style.content !== "none" && style.borderBlockStartWidth === "1px",
+      aligned:
+        !!label &&
+        start > 0 &&
+        start === end &&
+        Math.abs(bounds.left + start - label.left) < 1,
+    };
+  });
+
+test("popout works as a standalone list and allows multiple open rows", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 800 });
+  await page.goto(`${viewer}#/design/components/accordion`);
+  const list = page.getByRole("region", {
+    name: "Popout accordion in a long list",
+  });
+  await expect(list.getByRole("button")).toHaveCount(12);
+  const materials = list.getByRole("button", {
+    name: "Materials",
+    exact: true,
+  });
+  const access = list.getByRole("button", { name: "Access", exact: true });
+  const accessRow = list.locator(".buzz-accordion-item").filter({
+    has: page.getByRole("button", { name: "Access", exact: true }),
+  });
+  await expect
+    .poll(() => divider(accessRow))
+    .toEqual({
+      visible: true,
+      aligned: true,
+    });
+  await materials.click();
+  await expect.poll(async () => (await divider(accessRow)).visible).toBe(false);
+  await access.click();
+  await expect(materials).toHaveAttribute("aria-expanded", "true");
+  await expect(access).toHaveAttribute("aria-expanded", "true");
+  const expanded = list.locator(".buzz-accordion-item[data-open]");
+  await expect(expanded).toHaveCount(2);
+  const longContent = expanded.first().locator(".buzz-accordion-content");
+  await expect
+    .poll(() =>
+      longContent.evaluate((node) => node.scrollWidth <= node.clientWidth),
+    )
+    .toBe(true);
+  await expect
+    .poll(() =>
+      expanded.first().evaluate((item) => {
+        const root = item.parentElement;
+        if (!root) return false;
+        const row = item.getBoundingClientRect();
+        const frame = root.getBoundingClientRect();
+        const backdrop = getComputedStyle(item, "::before");
+        const left = row.left + Number.parseFloat(backdrop.left);
+        const right = row.right - Number.parseFloat(backdrop.right);
+        return (
+          backdrop.opacity === "1" &&
+          left >= frame.left - 1 &&
+          right <= frame.right + 1 &&
+          left < row.left
+        );
+      }),
+    )
+    .toBe(true);
+});
+
 test("expanded Settings cards own adjacent borders and keep long text keyboard-scrollable", async ({
   page,
 }) => {
   await page.setViewportSize({ width: 390, height: 800 });
   await page.goto(`${viewer}#/design/components/accordion`);
   const example = page.getByRole("region", {
-    name: "Settings disclosures with an expanded card",
+    name: "Popout accordion in Settings",
   });
   const publishing = example.getByRole("button", { name: "Publishing" });
   const notes = example.locator(".buzz-accordion").filter({
@@ -31,10 +108,12 @@ test("expanded Settings cards own adjacent borders and keep long text keyboard-s
 
   await expect(publishing).toHaveAccessibleDescription("Default instructions");
   await expect.poll(() => cardStyle("opacity")).toBe("0");
-  await expect(notes).not.toHaveCSS(
-    "border-block-start-color",
-    "rgba(0, 0, 0, 0)",
-  );
+  await expect
+    .poll(() => divider(notes))
+    .toEqual({
+      visible: true,
+      aligned: true,
+    });
 
   await publishing.focus();
   await page.keyboard.press("Shift+Tab");
@@ -47,15 +126,19 @@ test("expanded Settings cards own adjacent borders and keep long text keyboard-s
   expect(Number.parseFloat(await cardStyle("inset-inline-start"))).toBeLessThan(
     0,
   );
-  await expect(card).toHaveCSS("border-block-start-color", "rgba(0, 0, 0, 0)");
-  await expect(notes).toHaveCSS("border-block-start-color", "rgba(0, 0, 0, 0)");
+  await expect.poll(async () => (await divider(card)).visible).toBe(false);
+  await expect.poll(async () => (await divider(notes)).visible).toBe(false);
 
   const body = card.locator(".buzz-accordion-scroll");
+  const frame = card.locator(".buzz-accordion-scroll-frame");
+  await expect(frame).toHaveCSS("border-top-style", "solid");
+  await expect(frame).toHaveCSS("border-top-width", "1px");
+  await expect(frame).toHaveCSS("border-start-start-radius", /[1-9]\d*px/);
   await expect(body).toHaveAttribute("data-overflow-end", "");
   await expect(body).not.toHaveCSS("mask-image", "none");
   await page.keyboard.press("Tab");
   await expect(body).toBeFocused();
-  await expectKeyboardRing(body, "-2px");
+  await expectKeyboardRing(frame, "-2px");
   await expect(body).toHaveCSS("mask-image", "none");
   await page.keyboard.press("End");
   await expect(body).not.toHaveAttribute("data-overflow-end");
@@ -68,10 +151,7 @@ test("expanded Settings cards own adjacent borders and keep long text keyboard-s
   await publishing.press("Space");
   await expect(publishing).toHaveAttribute("aria-expanded", "false");
   await expect.poll(() => cardStyle("opacity")).toBe("0");
-  await expect(notes).not.toHaveCSS(
-    "border-block-start-color",
-    "rgba(0, 0, 0, 0)",
-  );
+  await expect.poll(async () => (await divider(notes)).visible).toBe(true);
 
   const standard = notes.getByRole("button", { name: "Working notes" });
   await standard.click();
