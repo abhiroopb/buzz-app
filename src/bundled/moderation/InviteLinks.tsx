@@ -21,7 +21,8 @@ const STATUS: Record<InviteSummary["status"], string> = {
 };
 
 /** How a link's expiry reads wherever it is shown. */
-export function inviteExpiry(expiresAt: number) {
+export function inviteExpiry(expiresAt: number | null) {
+  if (expiresAt === null) return "Never expires";
   const date = new Date(expiresAt * 1000).toLocaleString(undefined, {
     dateStyle: "medium",
     timeStyle: "short",
@@ -40,20 +41,29 @@ const uses = (invite: InviteSummary) =>
     ? `${invite.use_count} ${invite.use_count === 1 ? "use" : "uses"}`
     : `${invite.use_count} of ${invite.max_uses} uses`;
 
+/** Whether `a` sorts before `b` in the relay's newest-first order. */
+const newer = (a: InviteSummary, b: InviteSummary) =>
+  a.created_at !== b.created_at ? a.created_at > b.created_at : a.id > b.id;
+
 /** The community's invite links, with revoking by row or by pasted link. */
 export function InviteLinks({
   community,
   name,
   locked,
   active,
+  visible,
 }: {
   community: string;
   name(pubkey: string): string;
   locked: boolean;
   active(): boolean;
+  /** Hidden while another tab shows; the list stays mounted so a revoke in flight lands here. */
+  visible: boolean;
 }) {
-  const [invites, setInvites] = useState<InviteSummary[] | null>(null);
-  const [next, setNext] = useState<string | null>(null);
+  const [list, setList] = useState<{
+    invites: InviteSummary[];
+    next: string | null;
+  } | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -62,6 +72,9 @@ export function InviteLinks({
     { id: string; label: string } | { code: string; label: string } | null
   >(null);
   const [revoking, setRevoking] = useState(false);
+  const [revokeError, setRevokeError] = useState("");
+  // Confirmed revocations by id; they win over any list read that raced them.
+  const [revoked, setRevoked] = useState<Record<string, number>>({});
   const reads = useRef(0);
 
   const load = useCallback(
@@ -72,10 +85,23 @@ export function InviteLinks({
       try {
         const page = await listInvites(community, before);
         if (read !== reads.current) return;
-        setInvites((shown) =>
-          before ? [...(shown ?? []), ...page.invites] : page.invites,
-        );
-        setNext(page.next_before);
+        setList((shown) => {
+          if (before)
+            return {
+              invites: [...(shown?.invites ?? []), ...page.invites],
+              next: page.next_before,
+            };
+          // A refresh replaces the first page and keeps any older pages shown.
+          const last = page.invites.at(-1);
+          const older =
+            page.next_before && last
+              ? (shown?.invites ?? []).filter((invite) => newer(last, invite))
+              : [];
+          return {
+            invites: [...page.invites, ...older],
+            next: older.length ? (shown?.next ?? null) : page.next_before,
+          };
+        });
       } catch (reason) {
         if (read === reads.current) setError(message(reason));
       } finally {
@@ -85,36 +111,62 @@ export function InviteLinks({
     [community],
   );
   useEffect(() => {
-    void load();
-    return () => {
+    if (visible) void load();
+  }, [load, visible]);
+  useEffect(
+    () => () => {
       ++reads.current;
-    };
-  }, [load]);
+    },
+    [],
+  );
+  // Leaving the tab drops an unsent confirmation, as Members does.
+  useEffect(() => {
+    if (!visible && !revoking) {
+      setPending(null);
+      setRevokeError("");
+    }
+  }, [visible, revoking]);
 
   const pastedCode = pasted.trim() ? pastedInviteCode(community, pasted) : null;
   const pastedError =
     pastedCode && "error" in pastedCode ? pastedCode.error : "";
 
+  function close() {
+    setPending(null);
+    setRevokeError("");
+  }
+
   async function revoke() {
     if (!pending || !active() || locked || revoking) return;
     setRevoking(true);
-    setError("");
+    setRevokeError("");
     setNotice("");
     try {
-      await revokeInvite(
+      const receipt = await revokeInvite(
         community,
         "id" in pending ? { id: pending.id } : { code: pending.code },
       );
+      setRevoked((shown) => ({ ...shown, [receipt.id]: receipt.revoked_at }));
       if ("code" in pending) setPasted("");
+      setPending(null);
       setNotice("Invite link revoked. People who already joined stay in.");
-      await load();
     } catch (reason) {
-      setError(message(reason));
+      // The outcome may be unknown after a timeout; Refresh shows what the relay holds.
+      setRevokeError(message(reason));
     } finally {
       setRevoking(false);
-      setPending(null);
     }
   }
+
+  const shown = list?.invites.map((invite) =>
+    revoked[invite.id] === undefined
+      ? invite
+      : {
+          ...invite,
+          revoked_at: revoked[invite.id] ?? null,
+          status: "revoked" as const,
+        },
+  );
 
   return (
     <div className="flex flex-col gap-6">
@@ -168,16 +220,27 @@ export function InviteLinks({
         </div>
       </form>
       <div>
-        <h3 className="m-0 pb-2 text-caption text-subtle">Invite links</h3>
-        {invites === null ? (
+        <div className="flex items-center justify-between gap-3 pb-2">
+          <h3 className="m-0 text-caption text-subtle">Invite links</h3>
+          <Button
+            size="sm"
+            variant="subtle"
+            loading={loading}
+            disabled={loading}
+            onClick={() => void load()}
+          >
+            {error ? "Retry" : "Refresh"}
+          </Button>
+        </div>
+        {shown === undefined ? (
           !error && <p role="status">Loading invite links…</p>
-        ) : invites.length === 0 ? (
+        ) : shown.length === 0 ? (
           <p role="status" className="text-body-sm text-muted">
             No invite links yet.
           </p>
         ) : (
           <ul className={styles.members} aria-label="Invite links">
-            {invites.map((invite) => {
+            {shown.map((invite) => {
               // Creation time and a short id tell one creator's links apart.
               const label = `Link ${invite.id.slice(0, 8)} by ${name(invite.created_by)}, created ${created(invite.created_at)}`;
               return (
@@ -205,13 +268,13 @@ export function InviteLinks({
             })}
           </ul>
         )}
-        {next && (
+        {list?.next && (
           <div className="mt-2">
             <Button
               size="sm"
               loading={loading}
               disabled={loading}
-              onClick={() => void load(next)}
+              onClick={() => void load(list.next ?? undefined)}
             >
               Show more
             </Button>
@@ -220,16 +283,9 @@ export function InviteLinks({
       </div>
       <div className="flex flex-col gap-2 empty:hidden">
         {error && (
-          <div className="flex items-center justify-between gap-3">
-            <p role="alert" className="m-0 text-body-sm">
-              {error}
-            </p>
-            {invites === null && (
-              <Button size="sm" loading={loading} onClick={() => void load()}>
-                Retry
-              </Button>
-            )}
-          </div>
+          <p role="alert" className="m-0 text-body-sm">
+            {error}
+          </p>
         )}
         {notice && (
           <p role="status" className="m-0 text-body-sm">
@@ -237,15 +293,15 @@ export function InviteLinks({
           </p>
         )}
       </div>
-      {pending && (
+      {pending && visible && (
         <AlertDialog
           title={`Revoke ${pending.label}?`}
           description="Nobody new can join with it. People who already joined stay in."
           pending={revoking}
-          onClose={() => setPending(null)}
+          onClose={close}
           actions={
             <>
-              <Button disabled={revoking} onClick={() => setPending(null)}>
+              <Button disabled={revoking} onClick={close}>
                 Cancel
               </Button>
               <Button
@@ -254,11 +310,17 @@ export function InviteLinks({
                 disabled={revoking || locked}
                 onClick={() => void revoke()}
               >
-                Revoke
+                {revokeError ? "Retry" : "Revoke"}
               </Button>
             </>
           }
-        />
+        >
+          {revokeError && (
+            <p role="alert" className="m-0 text-body-sm">
+              {revokeError}
+            </p>
+          )}
+        </AlertDialog>
       )}
     </div>
   );

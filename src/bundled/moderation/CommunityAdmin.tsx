@@ -554,6 +554,8 @@ function MembershipContent({
       ? "members"
       : requestedMethod;
   const open = method === "invite";
+  const [linksVisited, setLinksVisited] = useState(false);
+  if (method === "links" && !linksVisited) setLinksVisited(true);
   const [ttl, setTtl] = useState(String(3 * DAY));
   const [uses, setUses] = useState("");
   const [identity, setIdentity] = useState("");
@@ -836,17 +838,20 @@ function MembershipContent({
           </div>
         </section>
       )}
-      {method === "links" && (
+      {/* Mounted from the first visit so a revoke in flight survives Back/Forward. */}
+      {(method === "links" || linksVisited) && (
         <section
           role="tabpanel"
           id="invite-links-panel"
           aria-labelledby="invite-links-panel-tab"
+          hidden={method !== "links"}
         >
           <InviteLinks
             community={community}
             name={name}
             locked={locked}
             active={active}
+            visible={method === "links"}
           />
         </section>
       )}

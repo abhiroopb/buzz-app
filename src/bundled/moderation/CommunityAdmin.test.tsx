@@ -791,3 +791,164 @@ it("lists invite links and revokes one by row or by pasted link", async () => {
     ).toEqual({ code: "abc" }),
   );
 });
+
+const linkId = (n: number) => `${n}b9c8f7e-1d2a-4b3c-9e8f-7a6b5c4d3e2f`;
+const link = (n: number, extra: Record<string, unknown> = {}) => ({
+  id: linkId(n),
+  created_by: owner,
+  created_at: 1700000000 - n,
+  expires_at: 4102444800,
+  max_uses: null,
+  use_count: 0,
+  revoked_at: null,
+  status: "active",
+  ...extra,
+});
+const unavailable = () =>
+  Response.json(
+    { error: "community writes are temporarily unavailable" },
+    { status: 503 },
+  );
+
+it("shows a revoke from its receipt and keeps older pages on refresh", async () => {
+  const user = userEvent.setup();
+  let reads = 0;
+  broker({
+    invites: (body) => {
+      reads++;
+      if ((body as { before?: string }).before)
+        return Response.json({ invites: [link(2)], next_before: null });
+      // The read after the first page fails; the receipt alone shows the revoke.
+      if (reads === 3) return unavailable();
+      return Response.json({
+        invites: [link(1)],
+        next_before: `1699999999_${linkId(1)}`,
+      });
+    },
+    "invite-revoke": (body) =>
+      Response.json({
+        id: (body as { id: string }).id,
+        revoked_at: 1700000100,
+      }),
+  });
+  const { relay: data } = relay(owner);
+  render(<CommunityAdmin relay={data} active={() => true} />);
+  await user.click(await screen.findByRole("tab", { name: "Links" }));
+  const list = await screen.findByRole("list", { name: "Invite links" });
+  await user.click(screen.getByRole("button", { name: "Show more" }));
+  await waitFor(() =>
+    expect(within(list).getAllByRole("listitem")).toHaveLength(2),
+  );
+
+  await user.click(
+    screen.getAllByRole("button", {
+      name: /^Revoke Link 1b9c8f7e/,
+    })[0] as HTMLElement,
+  );
+  await user.click(
+    within(await screen.findByRole("alertdialog")).getByRole("button", {
+      name: "Revoke",
+    }),
+  );
+  await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+  const [first] = within(list).getAllByRole("listitem");
+  expect(first).toHaveTextContent("Revoked");
+  expect(within(first as HTMLElement).queryByRole("button")).toBeNull();
+
+  await user.click(screen.getByRole("button", { name: "Refresh" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "community writes are temporarily unavailable",
+  );
+  // The receipt still wins, and Retry works with the list loaded.
+  expect(within(list).getAllByRole("listitem")[0]).toHaveTextContent("Revoked");
+  await user.click(screen.getByRole("button", { name: "Retry" }));
+  await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+  expect(within(list).getAllByRole("listitem")).toHaveLength(2);
+  expect(within(list).getAllByRole("listitem")[0]).toHaveTextContent("Revoked");
+  expect(screen.queryByRole("button", { name: "Show more" })).toBeNull();
+});
+
+it("lands a held revoke after Back and Forward", async () => {
+  const user = userEvent.setup();
+  let finish!: (response: Response) => void;
+  const held = new Promise<Response>((resolve) => {
+    finish = resolve;
+  });
+  broker({
+    invites: () => Response.json({ invites: [link(1)], next_before: null }),
+    "invite-revoke": () => held,
+  });
+  const { relay: data } = relay(owner);
+  const active = () => true;
+  const view = render(
+    <CommunityAdmin relay={data} active={active} selectedMethod="links" />,
+  );
+  await user.click(await screen.findByRole("button", { name: /^Revoke Link/ }));
+  await user.click(
+    within(await screen.findByRole("alertdialog")).getByRole("button", {
+      name: "Revoke",
+    }),
+  );
+  view.rerender(
+    <CommunityAdmin relay={data} active={active} selectedMethod="members" />,
+  );
+  expect(screen.queryByRole("alertdialog")).toBeNull();
+  view.rerender(
+    <CommunityAdmin relay={data} active={active} selectedMethod="links" />,
+  );
+  await act(async () => {
+    finish(Response.json({ id: linkId(1), revoked_at: 1700000100 }));
+    await held;
+  });
+  const list = await screen.findByRole("list", { name: "Invite links" });
+  await waitFor(() => expect(list).toHaveTextContent("Revoked"));
+  expect(screen.queryByRole("button", { name: /^Revoke Link/ })).toBeNull();
+});
+
+it("keeps the confirmation open with a retry when revoke fails", async () => {
+  const user = userEvent.setup();
+  let attempts = 0;
+  const calls = broker({
+    invites: () => Response.json({ invites: [link(1)], next_before: null }),
+    "invite-revoke": () =>
+      ++attempts === 1
+        ? unavailable()
+        : Response.json({ id: linkId(1), revoked_at: 1700000100 }),
+  });
+  const { relay: data } = relay(owner);
+  render(
+    <CommunityAdmin relay={data} active={() => true} selectedMethod="links" />,
+  );
+  await user.click(await screen.findByRole("button", { name: /^Revoke Link/ }));
+  const dialog = await screen.findByRole("alertdialog");
+  await user.click(within(dialog).getByRole("button", { name: "Revoke" }));
+  expect(await within(dialog).findByRole("alert")).toHaveTextContent(
+    "community writes are temporarily unavailable",
+  );
+  expect(dialog).toHaveTextContent(/Link 1b9c8f7e/);
+  await user.click(within(dialog).getByRole("button", { name: "Retry" }));
+  await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+  expect(
+    calls.filter((c) => c.route === "invite-revoke").map((c) => c.body),
+  ).toEqual([{ id: linkId(1) }, { id: linkId(1) }]);
+  expect(screen.getByRole("list", { name: "Invite links" })).toHaveTextContent(
+    "Revoked",
+  );
+});
+
+it("shows a listed link without an expiry as never expiring", async () => {
+  broker({
+    invites: () =>
+      Response.json({
+        invites: [link(1, { expires_at: null })],
+        next_before: null,
+      }),
+  });
+  const { relay: data } = relay(owner);
+  render(
+    <CommunityAdmin relay={data} active={() => true} selectedMethod="links" />,
+  );
+  expect(
+    await screen.findByRole("list", { name: "Invite links" }),
+  ).toHaveTextContent("Active · 0 uses · Never expires");
+});

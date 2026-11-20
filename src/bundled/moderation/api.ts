@@ -28,7 +28,7 @@ export type InviteSummary = {
   id: string;
   created_by: string;
   created_at: number;
-  expires_at: number;
+  expires_at: number | null;
   max_uses: number | null;
   use_count: number;
   revoked_at: number | null;
