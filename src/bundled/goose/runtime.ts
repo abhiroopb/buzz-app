@@ -1307,6 +1307,13 @@ export class GooseRuntime {
               conversation: held ? key : null,
             },
           );
+          // A one-off turn's, as an ordinary one's is: its key is kept only
+          // while Usage is on.
+          if (!held)
+            void standaloneSessions(this.agentStore, "goose", agent).add(
+              id,
+              this.usageOn() ? key : undefined,
+            );
         },
         outlives: (retirement, exited) => {
           // Before the turn ends: by then, one whose process exited is

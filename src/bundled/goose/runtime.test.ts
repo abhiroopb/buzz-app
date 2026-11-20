@@ -3857,6 +3857,60 @@ describe("goose turns through the agent gateway", () => {
       prompt: async () => "Check in",
     } as unknown as Parameters<GooseRuntime["runOnce"]>[0]);
 
+  /** A forwarded standalone turn of an agent whose one-off sessions are
+   * recorded in `items`, run to its end. */
+  const recorded = async (usage: boolean) => {
+    const items = new Map<string, string>();
+    const g = gateway();
+    const f = setup({
+      forwarding: g.forwarding,
+      agentStore: localStore({
+        get length() {
+          return items.size;
+        },
+        key: (index: number) => [...items.keys()][index] ?? null,
+        getItem: (key: string) => items.get(key) ?? null,
+        setItem: (key: string, value: string) => void items.set(key, value),
+        removeItem: (key: string) => void items.delete(key),
+        clear: () => items.clear(),
+      }),
+    });
+    f.runtime.usageOn = () => usage;
+    try {
+      const turn = standalone(f);
+      await vi.waitFor(() => expect(f.fake.geese[0]?.turns).toHaveLength(1));
+      f.fake.geese[0]?.turns[0]?.finish();
+      f.fake.geese[0]?.exit(null);
+      await turn;
+      const kept = [...items.keys()]
+        .filter((key) => key.startsWith(STANDALONE_PREFIX))
+        .flatMap((key) => JSON.parse(items.get(key) ?? "").sessions);
+      const session = {
+        id: "session-1",
+        revision: "r",
+        gaps: [],
+        startedAt: 1,
+        lastAt: 2,
+        observations: [],
+      };
+      return { kept, wakes: await f.runtime.withWakes(self, [session]) };
+    } finally {
+      f.runtime.dispose();
+    }
+  };
+
+  it("tells which timer a forwarded standalone session was started for", async () => {
+    const { kept, wakes } = await recorded(true);
+    expect(kept).toEqual([["session-1", expect.any(Number), "Timer"]]);
+    expect(wakes).toMatchObject([{ id: "session-1", wake: "Timer" }]);
+  });
+
+  it("records a forwarded standalone session but not its timer while Usage is off", async () => {
+    const { kept, wakes } = await recorded(false);
+    expect(kept).toEqual([["session-1", expect.any(Number)]]);
+    expect(wakes[0]).not.toHaveProperty("wake");
+  });
+
   it("refuses a forwarded standalone wake in community scope before starting Goose", async () => {
     const g = gateway();
     const f = setup({ forwarding: g.forwarding });
