@@ -331,7 +331,7 @@ test("a fully visible incoming row stays quiet without publishing read intent", 
   // The earlier row can finish its dwell as the clock advances. Publish
   // after its read frontier so this live mention starts unread.
   const row = liveMessage(app, "Visible mention", {
-    createdAt: following.created_at + 1,
+    createdAt: earlier.created_at + 1,
   });
   await expect
     .poll(() =>
