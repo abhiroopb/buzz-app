@@ -2907,6 +2907,27 @@ not generation. Reactive filtered reads use `session.observe`;
 writes use `session.outbox` or the `session.messages` convenience methods. Reads,
 live traffic and local events share reconciliation, with no separately injected
 write service. Dispose owned views when their plugin or session scope ends.
+
+`session.ownerMentions` is an optional, read-only capability. On a host with
+`version === 1`, call `latest({ channelId, rootId })` to read the latest confirmed
+explicit mention in that source. Use `null` for the channel level, a message ID
+for the thread it starts, or the reply target ID for a nested branch. A nested
+reply updates only its branch. A top-level message also starts its own thread.
+The result has `eventId`, `createdAtMs`, and `recipientIds` in editor order.
+Pass up to 128 eligible recipient IDs as the second argument to find the
+latest retained mention of any of them. This also limits the returned
+`recipientIds` to that set.
+Subscribe once with `subscribe(listener)` and reread `latest` before using a
+result from asynchronous work. Bind to the current session on reconnect.
+
+The host records evidence from a human Send with explicit editor selections,
+then exposes it after relay acknowledgement or verified history readback.
+Automatic recipients, older messages, and raw writes have unknown provenance.
+They leave the last confirmed result in place. The bounded index is local to the
+running app and its viewer and community. It survives reconnect and session
+replacement. `null` means evidence or access is unavailable. This reader
+performs no relay queries and returns no message text.
+
 For kind 30177 publication, follow the
 [managed-agent registration guidance](relay-queries.md#managed-agent-registration-kind-30177).
 

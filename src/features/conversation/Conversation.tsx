@@ -16,7 +16,7 @@ import {
   type ChannelTimelineProps,
 } from "../messages/ChannelTimeline";
 import {
-  MessageComposer,
+  HostMessageComposer,
   type MessageComposerProps,
 } from "../messages/MessageComposer";
 import {
@@ -310,7 +310,7 @@ export function ConversationComposer(props: Own<MessageComposerProps>) {
     shared.soloConversation,
   );
   return (
-    <MessageComposer
+    <HostMessageComposer
       {...shared}
       {...(shared.soloConversation
         ? {

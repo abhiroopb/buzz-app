@@ -56,7 +56,10 @@ import {
   continuesMessageGroup,
   publicMessageNeighbor,
 } from "./message-grouping";
-import { MessageComposer, type MessageComposerProps } from "./MessageComposer";
+import {
+  HostMessageComposer,
+  type MessageComposerProps,
+} from "./MessageComposer";
 import { ChannelJoinNotice } from "./ChannelJoinNotice";
 import { useListedChannel } from "../relay/listed-channel";
 import type { CSSProperties } from "react";
@@ -2497,7 +2500,7 @@ function ThreadMessages({
         />
       )}
       {composerRoot && (
-        <MessageComposer
+        <HostMessageComposer
           onFocusedRemoval={focusArchivedHistory}
           key={`${scope}:${channelId}:${composerRoot.id}`}
           extensions={extensions}

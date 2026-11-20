@@ -1,6 +1,6 @@
 import type { ConversationExtensions } from "../../features/conversation/contracts";
 import { clearAttachmentDraft } from "../../features/messages/attachment-draft";
-import { MessageComposer } from "../../features/messages/MessageComposer";
+import { HostMessageComposer } from "../../features/messages/MessageComposer";
 import { useEffect, useState } from "react";
 import type { PanelProps } from "../../features/panels/service";
 import type { RelayData } from "../../features/relay/service";
@@ -59,7 +59,7 @@ export function HuddlePanel({
       discussion={discussion}
       openLink={(url) => context?.open(url) || openLink?.(url) || false}
       composer={
-        <MessageComposer
+        <HostMessageComposer
           session={connection.session}
           extensions={extensions}
           scope={connection.scope ?? ""}

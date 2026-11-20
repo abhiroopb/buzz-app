@@ -1,0 +1,181 @@
+import type { EventData } from "./events";
+import { eventMs } from "./message-order";
+import type { Outbox } from "./outbox";
+import { threadReference } from "./thread-reference";
+
+type Source = Readonly<{ channelId: string; rootId: string | null }>;
+type Evidence = Readonly<{
+  eventId: string;
+  createdAtMs: number;
+  recipientIds: readonly string[];
+}>;
+const MAX_CANDIDATES = 128;
+const inOrder = (a: Evidence, b: Evidence) =>
+  a.createdAtMs - b.createdAtMs || a.eventId.localeCompare(b.eventId);
+
+const capture = new WeakMap<
+  Pick<Outbox, "snapshot">,
+  {
+    outbox: Outbox;
+    ownsMessages(messages: object): boolean;
+    record(event: EventData, recipients: readonly string[]): void;
+  }
+>();
+
+/** Only the human composer calls this. Raw send methods carry no provenance. */
+export function sendWithOwnerMentions<T extends string | Promise<string>>(
+  sender: { outbox?: Pick<Outbox, "snapshot"> | undefined; messages: object },
+  recipients: readonly string[],
+  send: () => T,
+): T {
+  const owner = sender.outbox && capture.get(sender.outbox);
+  if (!owner?.ownsMessages(sender.messages) || !recipients.length)
+    return send();
+  const events: EventData[] = [];
+  const stop = owner.outbox.observeSend((candidate) => {
+    events.push(candidate);
+    return undefined;
+  });
+  try {
+    const id = send();
+    const event = events.find((event) => id === event.id);
+    if (event) owner.record(event, recipients);
+    return id;
+  } finally {
+    stop();
+  }
+}
+
+/** The relay service retains this device-local index across session replacement. */
+export function createOwnerMentionStore(viewer: string) {
+  const pending = new Map<string, Evidence>();
+  const latest = new Map<string, Evidence>();
+  const listeners = new Set<() => void>();
+  const key = ({ channelId, rootId }: Source, recipientId?: string) =>
+    JSON.stringify([channelId, rootId, recipientId]);
+  const put = <T>(map: Map<string, T>, id: string, value: T, limit: number) => {
+    map.delete(id);
+    map.set(id, value);
+    if (map.size > limit) map.delete(map.keys().next().value as string);
+  };
+  let notifying = false;
+  const changed = () => {
+    if (notifying || !listeners.size) return;
+    notifying = true;
+    queueMicrotask(() => {
+      notifying = false;
+      for (const listener of listeners) {
+        try {
+          listener();
+        } catch {
+          // One consumer cannot interrupt another.
+        }
+      }
+    });
+  };
+  return {
+    bind(
+      outbox: Outbox,
+      canRead: (channelId: string) => boolean,
+      signal: AbortSignal,
+      subscribeAccess: (listener: () => void) => () => void,
+      ownsMessages: (messages: object) => boolean,
+    ) {
+      capture.set(outbox, {
+        outbox,
+        ownsMessages,
+        record(event, recipients) {
+          if (event.kind !== 9 || event.pubkey !== viewer) return;
+          const tagged = new Set(
+            event.tags.filter(([name]) => name === "p").map((tag) => tag[1]),
+          );
+          const recipientIds = [...new Set(recipients)].filter((id) =>
+            tagged.has(id),
+          );
+          if (!recipientIds.length) return;
+          put(
+            pending,
+            event.id,
+            Object.freeze({
+              eventId: event.id,
+              createdAtMs: eventMs(event),
+              recipientIds: Object.freeze(recipientIds),
+            }),
+            512,
+          );
+        },
+      });
+      const ownListeners = new Set<() => void>();
+      const stopAccess = subscribeAccess(changed);
+      signal.addEventListener(
+        "abort",
+        () => {
+          capture.delete(outbox);
+          stopAccess();
+          for (const listener of ownListeners) listeners.delete(listener);
+          ownListeners.clear();
+        },
+        { once: true },
+      );
+      return Object.freeze({
+        version: 1 as const,
+        latest(source: Source, eligibleRecipientIds?: readonly string[]) {
+          if (signal.aborted || !canRead(source.channelId)) return null;
+          if (eligibleRecipientIds === undefined)
+            return latest.get(key(source)) ?? null;
+          if (eligibleRecipientIds.length > MAX_CANDIDATES) return null;
+          let newest: Evidence | undefined;
+          const eligible = new Set(eligibleRecipientIds);
+          for (const recipientId of eligible) {
+            const candidate = latest.get(key(source, recipientId));
+            if (candidate && (!newest || inOrder(newest, candidate) < 0))
+              newest = candidate;
+          }
+          if (!newest) return null;
+          return Object.freeze({
+            ...newest,
+            recipientIds: Object.freeze(
+              newest.recipientIds.filter((id) => eligible.has(id)),
+            ),
+          });
+        },
+        subscribe(listener: () => void) {
+          if (signal.aborted) return () => {};
+          ownListeners.add(listener);
+          listeners.add(listener);
+          return () => {
+            ownListeners.delete(listener);
+            listeners.delete(listener);
+          };
+        },
+      });
+    },
+    confirm(event: EventData, canRead: (channelId: string) => boolean) {
+      const evidence = pending.get(event.id);
+      if (!evidence || event.kind !== 9 || event.pubkey !== viewer) return;
+      const channelId = event.tags.find(([name]) => name === "h")?.[1];
+      if (!channelId || !canRead(channelId)) return;
+      pending.delete(event.id);
+      const thread = threadReference(event);
+      // A nested reply updates its selected branch. A top-level send also
+      // starts the thread whose root is the message itself.
+      const roots = thread ? [thread.parentId] : [null, event.id];
+      let advanced = false;
+      for (const rootId of roots) {
+        for (const recipientId of [undefined, ...evidence.recipientIds]) {
+          const address = key({ channelId, rootId }, recipientId);
+          const previous = latest.get(address);
+          if (previous && inOrder(previous, evidence) >= 0) continue;
+          put(latest, address, evidence, 4096);
+          advanced = true;
+        }
+      }
+      if (advanced) changed();
+    },
+    clear() {
+      pending.clear();
+      latest.clear();
+      changed();
+    },
+  };
+}

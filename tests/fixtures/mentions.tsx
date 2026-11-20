@@ -1,3 +1,4 @@
+import { HostMessageComposer } from "../../src/features/messages/MessageComposer";
 import "../../src/shared/styles/globals.css";
 import { useKeyboardFocusVisibility } from "../../src/shared/design-system/useKeyboardFocusVisibility";
 import { AgentSettings } from "../../src/app/AgentSettings";
@@ -417,6 +418,8 @@ Object.assign(window, {
     first: first.pubkey,
     second: second.pubkey,
     publications,
+    ownerMention: (rootId: string | null) =>
+      owner.session.ownerMentions?.latest({ channelId: "c", rootId }),
     replaceRecipients: (people: readonly { pubkey: string; name: string }[]) =>
       replaceRecipients(people),
     disabledCalls,
@@ -525,7 +528,8 @@ function Fixture() {
         </>
       )}
       <div style={{ width: "100%", maxWidth: 720 }}>
-        <conversation.ui.Composer
+        <HostMessageComposer
+          extensions={conversation}
           disabled={disabled}
           session={namedSession}
           scope={

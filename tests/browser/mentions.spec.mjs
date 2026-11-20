@@ -399,6 +399,14 @@ test("actual composer selects namesakes by exact key, publishes channel/reply ta
     ["p", keys.second],
   ]);
   expect(first.tags.filter(([tag]) => tag === "h")).toEqual([["h", "c"]]);
+  // A real browser Send click carries editor selection evidence through to
+  // the plugin reader after delivery. Relay tags alone cannot supply it.
+  await expect
+    .poll(() => page.evaluate(() => window.mentionFixture.ownerMention(null)))
+    .toMatchObject({
+      eventId: first.id,
+      recipientIds: [keys.first, keys.second],
+    });
   await page.getByRole("button", { name: "Toggle thread" }).click();
   await choose(keys.second);
   await page.evaluate(() =>
@@ -503,6 +511,37 @@ test("actual composer selects namesakes by exact key, publishes channel/reply ta
   expect(afterRemoval.tags.filter(([tag]) => tag === "p")).toEqual([
     ["p", keys.second],
   ]);
+  // A tool can set routing before a human Send without making it an explicit ping.
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () => window.mentionFixture.ownerMention("a".repeat(64))?.eventId,
+      ),
+    )
+    .toBe(afterRemoval.id);
+  await page.evaluate(
+    (pubkey) =>
+      window.mentionFixture.replaceRecipients([
+        { pubkey, name: "Honey", explicit: true },
+      ]),
+    keys.second,
+  );
+  await page.getByRole("button", { name: "Send message", exact: true }).click();
+  await expect
+    .poll(() => page.evaluate(() => window.mentionFixture.publications.length))
+    .toBe(4);
+  expect(
+    await page.evaluate(() =>
+      window.mentionFixture.publications
+        .at(-1)
+        .tags.filter(([tag]) => tag === "p"),
+    ),
+  ).toEqual([["p", keys.second]]);
+  expect(
+    await page.evaluate(
+      () => window.mentionFixture.ownerMention("a".repeat(64))?.eventId,
+    ),
+  ).toBe(afterRemoval.id);
   expect(errors.unexplained()).toEqual([]);
 });
 

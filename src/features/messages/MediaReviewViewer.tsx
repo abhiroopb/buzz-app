@@ -36,7 +36,7 @@ import { compareMessages } from "../relay/message-order";
 import { useProfileGeneration, useRowProfiles } from "../relay/react";
 import { rowProfileIds } from "../relay/membership";
 import { useKnownAgentPubkeys } from "../agents/use-known";
-import { MessageComposer } from "./MessageComposer";
+import { HostMessageComposer } from "./MessageComposer";
 import { ImageReviewStage } from "./ImageReviewStage";
 import { MessageRow } from "./MessageRow";
 import {
@@ -523,7 +523,7 @@ function ReviewShell({
                     if (attachment.kind === "video") video.current?.pause();
                   }}
                 >
-                  <MessageComposer
+                  <HostMessageComposer
                     shown={commentsOpen}
                     extensions={extensions}
                     session={session}
