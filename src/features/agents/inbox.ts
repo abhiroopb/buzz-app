@@ -123,7 +123,7 @@ export class AgentInbox {
     for (const id of ids) {
       this.channels.delete(id);
       const channel = discovery.get(id);
-      if (discovery.authorized(id) && channel?.channelType)
+      if (discovery.authorized(id) && channel?.channelType === "dm")
         this.channels.set(id, channel);
     }
     for (const listener of this.listeners) listener();
@@ -155,7 +155,7 @@ export class AgentInbox {
   async mentions(filter: ReadFilter, signal: AbortSignal) {
     try {
       const events = await this.read(filter, signal);
-      this.schedule(0);
+      if (events.length < filter.limit) this.schedule(0);
       return events;
     } catch (error) {
       if (!signal.aborted && !this.lifetime.aborted)

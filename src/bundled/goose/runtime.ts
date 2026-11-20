@@ -47,6 +47,12 @@ import {
 import { compactAt } from "../../features/agents/compact-at";
 import { workflowOf } from "../../features/agents/owner-attestation";
 import {
+  ownerLabel,
+  ownerRows,
+  ownerTurns,
+} from "../../features/agents/owner-view";
+import type { TranscriptTurn } from "../../features/agents/activity-transcript";
+import {
   ownerReads,
   readyOwnerReads,
   type AgentReads,
@@ -384,7 +390,22 @@ export class GooseRuntime {
   }
   /** The community's current name and kind for a channel, if it lists it. */
   channelLabel(agent: AgentKey, channelId: string) {
-    return this.reads(agent)?.channelLabel(channelId);
+    return ownerLabel(this.reads(agent), channelId);
+  }
+  /** The conversations among `rows` its owner can read. */
+  readableRows<T extends Readonly<{ channelId: string; community?: true }>>(
+    agent: AgentKey,
+    rows: readonly T[],
+  ) {
+    return ownerRows(rows, this.reads(agent));
+  }
+  /** The turns of `place` its owner can read. */
+  readableTurns<T extends TranscriptTurn>(
+    agent: AgentKey,
+    place: Readonly<{ channelId: string; community?: true }>,
+    turns: readonly T[],
+  ) {
+    return ownerTurns(turns, this.reads(agent), place);
   }
   subscribe(listener: () => void) {
     this.listeners.add(listener);

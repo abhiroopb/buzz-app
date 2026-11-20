@@ -955,29 +955,30 @@ async function gooseSetup(prepare?: (storage: AgentStore) => unknown) {
     provider: "synced-provider",
     scope: "thread",
   });
+  let runtime!: GooseRuntime;
   const f = await setup(
     "goose",
-    (relay, reads, core) =>
-      gooseRun(
-        new GooseRuntime(
-          host,
-          relay,
-          core,
-          memoryStorage(),
-          undefined,
-          undefined,
-          undefined,
-          undefined,
-          reads,
-        ),
-      ),
+    (relay, reads, core) => {
+      runtime = new GooseRuntime(
+        host,
+        relay,
+        core,
+        memoryStorage(),
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        reads,
+      );
+      return gooseRun(runtime);
+    },
     { ...GOOSE_LOCAL },
     seeded,
     synced(),
     [],
     prepare,
   );
-  return { ...f, goose };
+  return { ...f, goose, runtime };
 }
 
 const privateRead = (f: Fixture) =>
@@ -1050,4 +1051,63 @@ it("resumes an interrupted agent-only DM turn by reading it as the agent", async
   expect(f.goose.geese[0]?.turns[0]?.text).toContain("Private assignment");
   expect(f.session.channels.get?.(privateChannel)).toBeUndefined();
   expect(privateRead(f)).toBe(false);
+});
+
+it("keeps an interrupted private turn for retry when the agent's read fails", async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  const dm = await agentOnlyDm({ at: Math.floor(Date.now() / 1000) - 3_600 });
+  const f = await gooseSetup((storage) =>
+    writeInterrupted(storage, agentKey.pubkey, {
+      [dm.sent.id]: privateChannel,
+    }),
+  );
+  f.native.query.mockRejectedValue(new Error("Agent read refused"));
+  const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+  await vi.waitFor(() =>
+    expect(
+      f.service.snapshot().interrupted.map((agent) => agent.pubkey),
+    ).toEqual([agentKey.pubkey]),
+  );
+  f.service.resumeInterrupted();
+  await vi.waitFor(() =>
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining("could not resume its private turns"),
+      expect.any(Error),
+    ),
+  );
+  expect(f.deliveries).toHaveLength(0);
+  f.native.query.mockImplementation(dm.query);
+  await vi.advanceTimersByTimeAsync(50_000);
+  await vi.waitFor(() => expect(f.goose.geese[0]?.turns).toHaveLength(1));
+  expect(f.deliveries[0]?.trigger).toMatchObject({
+    type: "mention",
+    resumed: true,
+    event: { id: dm.sent.id },
+  });
+});
+
+it("keeps an agent-only DM out of the owner's saved conversations and labels", async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  const f = await gooseSetup();
+  const dm = await agentOnlyDm();
+  f.native.query.mockImplementation(dm.query);
+  f.mention();
+  await vi.waitFor(() => expect(f.goose.geese[0]?.turns).toHaveLength(1));
+  await vi.advanceTimersByTimeAsync(50_000);
+  await vi.waitFor(() => expect(f.goose.geese[0]?.turns).toHaveLength(2));
+  const key = f.service.find(agentKey.pubkey)?.key ?? "";
+  const rows = f.runtime.conversations(key).map(({ key: saved }) => ({
+    key: saved,
+    ...f.runtime.source(key, saved),
+  }));
+  expect(rows.map((row) => row.channelId).sort()).toEqual(
+    [channel, privateChannel].sort(),
+  );
+  expect(f.runtime.readableRows(key, rows).map((row) => row.channelId)).toEqual(
+    [channel],
+  );
+  expect(f.runtime.channelLabel(key, privateChannel)).toBeUndefined();
+  expect(f.runtime.channelLabel(key, channel)).toMatchObject({
+    name: "general",
+  });
 });

@@ -1830,17 +1830,34 @@ export class AgentRunners {
       );
       const found = new Set(owned.filter(hasEventProof).map(({ id }) => id));
       const hidden = ids.filter((id) => !found.has(id));
-      const agents = hidden.length
-        ? await this.host.readAsAgent?.(
+      let agents: readonly RelayEvent[] | undefined;
+      let retry: readonly string[] = [];
+      if (hidden.length)
+        try {
+          agents = await this.host.readAsAgent?.(
             agent,
             { ids: hidden, limit: hidden.length },
             signal,
-          )
-        : undefined;
-      return [...owned, ...(agents ?? [])];
+          );
+        } catch (error) {
+          if (signal.aborted) throw error;
+          retry = hidden;
+          console.warn(
+            `Agent ${agent.name} could not resume its private turns`,
+            error,
+          );
+        }
+      return { events: [...owned, ...(agents ?? [])], retry };
     };
     void read().then(
-      (events) => {
+      ({ events, retry }) => {
+        if (retry.length)
+          this.left = {
+            ...this.left,
+            [runner.key]: Object.fromEntries(
+              retry.map((id) => [id, left[id] ?? ""]),
+            ),
+          };
         // A turn's own run forgets it when it settles.
         const kept = new Set<string>();
         // Oldest first, as they were sent: a later correction stays last.
@@ -1861,7 +1878,9 @@ export class AgentRunners {
           if (queued) kept.add(event.id);
         }
         const forgotten = Object.fromEntries(
-          Object.entries(left).filter(([id]) => !kept.has(id)),
+          Object.entries(left).filter(
+            ([id]) => !kept.has(id) && !retry.includes(id),
+          ),
         );
         this.host.abandonFollowUps?.(agent, forgotten);
         this.unmark(runner.key, Object.keys(forgotten));

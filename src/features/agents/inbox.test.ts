@@ -203,3 +203,46 @@ it("does not back off mention polls that were cancelled", async () => {
     f.controller.abort();
   }
 });
+
+it("only resolves owner-invisible channels that are DMs", async () => {
+  const f = fixture();
+  f.query.mockImplementation(async (filters: readonly ReadFilter[]) =>
+    filters[0]?.kinds?.includes(39000)
+      ? eventsDto([
+          metadata(relay, channel, "Private stream", 1, [
+            ["private"],
+            ["t", "stream"],
+          ]),
+          roster(relay, channel, [agent.pubkey, sibling.pubkey], 1),
+        ])
+      : eventsDto([mention]),
+  );
+  try {
+    await f.inbox.mentions(filter, signal());
+    expect(f.inbox.channel(channel)).toBeUndefined();
+  } finally {
+    f.controller.abort();
+  }
+});
+
+it("keeps backing off until a whole catch-up window reads", async () => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  const random = vi.spyOn(Math, "random").mockReturnValue(0);
+  const f = fixture();
+  try {
+    f.query.mockRejectedValueOnce(new Error("Offline"));
+    await expect(f.inbox.mentions(filter, signal())).rejects.toThrow();
+    f.query.mockRejectedValueOnce(new Error("Offline"));
+    await expect(f.inbox.mentions(filter, signal())).rejects.toThrow();
+    await f.inbox.mentions({ ...filter, limit: 1 }, signal());
+    f.query.mockRejectedValueOnce(new Error("Offline"));
+    await expect(f.inbox.mentions(filter, signal())).rejects.toThrow();
+    vi.setSystemTime(Date.now() + 120_000 - 1);
+    expect(f.inbox.due()).toBe(false);
+    vi.setSystemTime(Date.now() + 1);
+    expect(f.inbox.due()).toBe(true);
+  } finally {
+    f.controller.abort();
+    random.mockRestore();
+  }
+});

@@ -56,6 +56,9 @@ export type AgentReads = Readonly<{
   profile(pubkey: string): RelayEvent | undefined;
   /** The community's name and kind for a channel, if it lists the channel now. */
   channelLabel(id: string): ChannelLabel | undefined;
+  /** Whether the owner's own connection can read the channel, as opposed to
+   * one only the agent can. Owner-facing views show only these. */
+  ownerReadable(id: string): boolean;
   /** Tells `listener` when the community's channel list changes, so
    * `channelLabel` may answer differently. */
   subscribeChannels(listener: () => void): () => void;
@@ -130,6 +133,9 @@ export function ownerReads(
         }
       );
     },
+    ownerReadable: (id: string) =>
+      session.channels.list().channels.some((item) => item.id === id) ||
+      !!session.channels.get?.(id),
     subscribeChannels: (listener: () => void) =>
       session.channels.subscribeList(listener),
     workflowAuthority: () => session.workflowAuthority,
