@@ -28,15 +28,21 @@ export async function readSubthread<
   { channel, root, anchor }: { channel: string; root: string; anchor: string },
   kinds: readonly number[],
   read: (filters: readonly ReadFilter[]) => Promise<readonly T[]>,
+  known?: ReadonlyMap<string, T>,
 ) {
   const parents = new Map<string, string>();
   const inThread = (event: T) =>
     kinds.includes(event.kind) &&
     event.tags.some(([name, value]) => name === "h" && value === channel);
   function record(event: T) {
-    const reference = threadReference(event);
-    if (event.id !== anchor && reference?.rootId === root && inThread(event))
-      parents.set(event.id, reference.parentId);
+    // Follow retained evidence before spending an exact lookup on a gap.
+    let row: T | undefined = event;
+    while (row && row.id !== anchor && !parents.has(row.id)) {
+      const reference = threadReference(row);
+      if (reference?.rootId !== root || !inThread(row)) return;
+      parents.set(row.id, reference.parentId);
+      row = known?.get(reference.parentId);
+    }
   }
   events.forEach(record);
   const missing = () =>

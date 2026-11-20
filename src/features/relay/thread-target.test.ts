@@ -472,44 +472,64 @@ it("never retains a selected reply rejected by the shared dual-channel access ga
   expect(h.view.snapshot().replies).toEqual([]);
 });
 
-it("reveals an exact descendant beyond the branch window and keeps the composer root", async () => {
-  const parent = message(alice, "a", "Unloaded ancestor", 10001, [
-    ["e", root.id, "", "root"],
-    ["e", reply.id, "", "reply"],
-  ]);
-  const selected = message(alice, "a", "Exact descendant", 10002, [
-    ["e", root.id, "", "root"],
-    ["e", parent.id, "", "reply"],
-  ]);
-  const sibling = message(alice, "a", "Outside the branch", 10003, [
-    ["e", root.id, "", "reply"],
-  ]);
-  const h = setup(reply.id, true);
-  const { loading } = await targetRead(h, reply, [], {
-    messageId: selected.id,
-    sourceThreadId: root.id,
-  });
-  const exact = h.next();
-  exact.respond([selected]);
-  await flush();
-  h.next().respond([]);
-  h.next().respond([parent]);
-  await flush();
-  h.next().respond([root, sibling]);
-  await loading;
+it.each([1, 5])(
+  "reveals an exact descendant with %s intervening parents",
+  async (depth) => {
+    const parents: RelayEvent[] = [];
+    for (let index = 0; index < depth; index++)
+      parents.push(
+        message(alice, "a", `Ancestor ${index}`, 10001 + index, [
+          ["e", root.id, "", "root"],
+          ["e", parents.at(-1)?.id ?? reply.id, "", "reply"],
+        ]),
+      );
+    const parent = parents.at(-1);
+    if (!parent) throw new Error("Expected a parent");
+    const selected = message(alice, "a", "Exact descendant", 10006, [
+      ["e", root.id, "", "root"],
+      ["e", parent.id, "", "reply"],
+    ]);
+    const sibling = message(alice, "a", "Outside the branch", 10007, [
+      ["e", root.id, "", "reply"],
+    ]);
+    const h = setup(reply.id, true);
+    const { loading } = await targetRead(h, reply, [], {
+      messageId: selected.id,
+      sourceThreadId: root.id,
+    });
+    const loaded = depth === 5 ? parents : [];
+    const source = h.next();
+    expect(source.filters[0]?.ids).toEqual([root.id]);
+    h.traffic.receive([sibling]);
+    expect(h.view.snapshot()).toMatchObject({
+      root: undefined,
+      targetStatus: "loading",
+    });
+    source.respond([root, sibling, ...loaded]);
+    await flush();
+    h.next().respond([selected]);
+    h.next().respond([]);
+    await flush();
+    if (!loaded.length) h.next().respond([parent]);
+    expect(h.pending).toHaveLength(0);
+    await loading;
 
-  expect(h.view.snapshot()).toMatchObject({
-    root: { id: reply.id },
-    replies: [{ id: selected.id }],
-    target: { id: selected.id },
-    targetStatus: "ready",
-  });
-  const selecting = h.view.retarget(sibling.id, new AbortController().signal);
-  h.next().respond([sibling]);
-  expect(await selecting).toBe("different");
-  expect(h.view.snapshot().target?.id).toBe(selected.id);
-  expect(h.view.snapshot().replies.map((row) => row.id)).toEqual([selected.id]);
-});
+    const replies = [...loaded, selected].map(({ id }) => ({ id }));
+    expect(h.view.snapshot()).toMatchObject({
+      root: { id: reply.id },
+      replies,
+      target: { id: selected.id },
+      targetStatus: "ready",
+    });
+    const selecting = h.view.retarget(sibling.id, new AbortController().signal);
+    h.next().respond([sibling]);
+    expect(await selecting).toBe("different");
+    expect(h.view.snapshot().target?.id).toBe(selected.id);
+    expect(h.view.snapshot().replies.map(({ id }) => ({ id }))).toEqual(
+      replies,
+    );
+  },
+);
 
 it("keeps the verified branch available when its initial selection is a sibling", async () => {
   const child = message(alice, "a", "Task reply", 10001, [
@@ -524,11 +544,11 @@ it("keeps the verified branch available when its initial selection is a sibling"
     messageId: sibling.id,
     sourceThreadId: root.id,
   });
-  h.next().respond([sibling]);
-  h.next().respond([]);
-  await flush();
   expect(h.view.snapshot().root).toBeUndefined();
   h.next().respond([root, child, sibling]);
+  await flush();
+  h.next().respond([sibling]);
+  h.next().respond([]);
   await loading;
   expect(h.view.snapshot()).toMatchObject({
     root: { id: reply.id },

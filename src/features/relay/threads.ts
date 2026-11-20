@@ -701,6 +701,7 @@ export function createThreadView({
               signal: owned.signal,
             }),
           ),
+        new Map(remote.map((row) => [row.id, row])),
       );
       if (!active()) return "cancelled";
       if (!branch.events.length) {
@@ -863,9 +864,7 @@ export function createThreadView({
     let nextCursor = replace ? undefined : cursor;
     let nextPages = replace ? 0 : pages;
     let fetched: readonly RelayEvent[] = [];
-    let branchSelection:
-      | { revision: number; status: "ready" | "unavailable" }
-      | undefined;
+    let branchSelection: { revision: number; id: string } | undefined;
     // Repair retains already-verified presentation; only a new/unavailable
     // selection waits for its initial fold. Never unmount a reader on reconnect.
     if (exact && replace && targetStatus !== "ready") targetStatus = "loading";
@@ -895,18 +894,12 @@ export function createThreadView({
           publish({ status: "ready", canLoadMore: false });
           return;
         }
-        const result =
-          anchorResult === "selected" && anchor !== selectedId
-            ? await readTarget(selectedId, owned, rootId)
-            : anchorResult;
-        if (!active()) return;
         if (revision === selectionRevision) {
-          const status = result === "selected" ? "ready" : "unavailable";
-          // A live update can fold while the physical root is still loading.
-          // Resolve the branch selection with the verified source read.
-          if (subthreadId) branchSelection = { revision, status };
+          // Prove the selection after the source read so deep branches can use
+          // their loaded ancestry without spending bounded exact queries.
+          if (subthreadId) branchSelection = { revision, id: selectedId };
           else {
-            targetStatus = status;
+            targetStatus = "ready";
             publish();
             if (snapshot.targetStatus !== "ready") {
               publish({ status: "ready", canLoadMore: false });
@@ -1148,8 +1141,15 @@ export function createThreadView({
       if (replace && !dropped) held = undefined;
       else if (replace && (unreached || !held?.size)) held = unverified();
       if (replace) shown = undefined;
-      if (branchSelection && branchSelection.revision === selectionRevision)
-        targetStatus = branchSelection.status;
+      if (branchSelection?.revision === selectionRevision) {
+        const result =
+          branchSelection.id === subthreadId
+            ? "selected"
+            : await readTarget(branchSelection.id, owned, rootId);
+        if (!active()) return;
+        if (branchSelection.revision === selectionRevision)
+          targetStatus = result === "selected" ? "ready" : "unavailable";
+      }
       publish({
         status: "ready",
         error: undefined,
@@ -1317,7 +1317,7 @@ export function createThreadView({
         };
       },
       retarget,
-      refresh(selection) {
+      refresh(selection?: Parameters<ThreadView["refresh"]>[0]) {
         if (subthreadId && !branchOpening) {
           branchOpening = selection ?? { messageId };
           messageId = branchOpening.messageId;
