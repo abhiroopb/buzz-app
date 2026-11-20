@@ -8,6 +8,7 @@ import {
 } from "@testing-library/react";
 import { PREVIEW_REST_MS } from "../../shared/design-system/ui/hoverIntent";
 import { afterEach, expect, it, vi } from "vitest";
+import type { ReactNode } from "react";
 import { MessageLink } from "./MessageLink";
 import { apply as registerLinks } from "../../bundled/links";
 import type { LinkRenderer } from "./contracts";
@@ -122,19 +123,55 @@ it("names an open channel and shows its hover card", async () => {
     this.style.display = "block";
   };
   const t = fixture();
+  const rich = (key: string, children: ReactNode) => (
+    <MessageLink
+      key={key}
+      url="buzz://channel/open"
+      registry={undefined}
+      onOpenLink={() => true}
+      session={t.session}
+      label="#authored"
+    >
+      {children}
+    </MessageLink>
+  );
   render(
     <>
       {link(t.session, "open")}
       {link(t.session, "open", null)}
+      {link(t.session, "open", "#crew lounge (old)")}
+      {link(t.session, "open", `#${"🛠".repeat(120)}`)}
+      {link(t.session, "open", "the crew room")}
+      {link(t.session, "open", "## crew")}
+      {link(t.session, "open", "#crew ")}
+      {link(t.session, "open", `#${"a".repeat(121)}`)}
+      {rich("formatted", <strong>#authored</strong>)}
+      {rich("mixed", ["#authored", <img key="image" alt="" />])}
     </>,
   );
   await act(async () => {});
   expect(t.refer).toHaveBeenCalledWith("open");
+  // Until the channel is known, a `#` label shows as written.
+  expect(screen.getAllByRole("link")[0]?.textContent).toBe("#authored");
   t.answer("open", crew);
-  // The authored label stays; a raw link takes the channel's name.
-  const [authored, raw] = screen.getAllByRole("link");
-  expect(authored?.textContent).toBe("#authored");
-  expect(raw?.textContent).toBe("#crew-open");
+  const links = screen.getAllByRole("link");
+  const raw = links[1];
+  // Text that is `#` and a channel name, spaces included and up to 120
+  // characters, takes the channel's name, as a raw link does, and copies with it.
+  for (const chip of links.slice(0, 4))
+    expect(chip.textContent).toBe("#crew-open");
+  expect(links[0]?.getAttribute("aria-label")).toBe("#crew-open");
+  expect(links[0]?.getAttribute("data-link-label")).toBe("#crew-open");
+  // Other text stays: no `#`, no channel name after it, or more than text.
+  expect(links.slice(4).map((link) => link.innerHTML)).toEqual([
+    "the crew room",
+    "## crew",
+    "#crew ",
+    `#${"a".repeat(121)}`,
+    "<strong>#authored</strong>",
+    '#authored<img alt="">',
+  ]);
+  expect(links[8]?.getAttribute("data-link-label")).toBe("#authored");
   fireEvent.mouseEnter(raw as HTMLElement);
   fireEvent.mouseMove(raw as HTMLElement);
   await act(() => vi.advanceTimersByTimeAsync(PREVIEW_REST_MS));

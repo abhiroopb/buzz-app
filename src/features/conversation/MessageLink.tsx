@@ -33,6 +33,7 @@ import {
 } from "../messages/composer-session";
 import { parseBuzzLink, isBuzzLink } from "../navigation/buzz-links";
 import { safeLinkUrl } from "../relay/message-content";
+import { canonicalDetailsName } from "../relay/channel-details-protocol";
 import {
   LinkChannelKindContext,
   LinkDescriptionContext,
@@ -95,6 +96,7 @@ export function MessageLink({
   scope,
   interactive = true,
   channelPrivate = false,
+  channelSolo = false,
 }: {
   url: string;
   children?: ReactNode;
@@ -109,6 +111,8 @@ export function MessageLink({
   scope?: string | undefined;
   interactive?: boolean;
   channelPrivate?: boolean;
+  /** The joined list holds the destination as a Solo chat, confirmed or not. */
+  channelSolo?: boolean;
 }) {
   const active = useConversationPresentation();
   const renderers = useSyncExternalStore(
@@ -172,9 +176,36 @@ export function MessageLink({
       : channelPrivate || named?.private
         ? "private"
         : "channel";
-  // The authored label is message text, so it stays; the lock marks it. A raw
-  // destination has no name to show.
-  const shown = withheld && label === undefined ? "Private channel" : children;
+  const channelName = withheld
+    ? undefined
+    : (directoryLabel ?? (named ? `#${named.name}` : undefined));
+  // The `#` completion writes a channel's name of the moment as its Markdown
+  // link's text. Text that is only `#` and a channel name, which may hold
+  // spaces, therefore follows the channel's current name once known, as a
+  // profile link follows its person's. `#name` prose has no children: its
+  // author wrote that name. A listed channel whose metadata has not arrived
+  // is called by the start of its ID, which is no name to show instead, and
+  // a Solo chat's title is not a channel name. The length is checked first:
+  // it keeps the canonical-name scan, quadratic in whitespace, off an
+  // arbitrary label.
+  const written =
+    !channelSolo &&
+    channelName?.startsWith("#") &&
+    channelName !== `#${destination?.channelId.slice(0, 8)}` &&
+    typeof children === "string" &&
+    children.startsWith("#")
+      ? children.slice(1)
+      : "";
+  const current =
+    written &&
+    [...written].length <= 120 &&
+    written === canonicalDetailsName(written)
+      ? channelName
+      : undefined;
+  // Any other authored label is message text, so it stays; the lock marks it.
+  // A raw destination has no name to show.
+  const shown =
+    withheld && label === undefined ? "Private channel" : (current ?? children);
   // A raw message destination names its author once read; a draft never reads.
   const byline = useLinkedMessageByline(
     interactive && label === undefined && children === undefined
@@ -184,13 +215,11 @@ export function MessageLink({
     destination?.messageId,
   );
   const display =
+    current ??
     label ??
     (withheld
       ? "Private channel"
-      : (byline ??
-        (chatName || undefined) ??
-        directoryLabel ??
-        (named ? `#${named.name}` : undefined)));
+      : (byline ?? (chatName || undefined) ?? channelName));
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuAnchor, setMenuAnchor] = useState<HTMLAnchorElement>();
   const [copying, setCopying] = useState(false);
@@ -297,7 +326,7 @@ export function MessageLink({
         aria-label={accessibleName ?? display}
         aria-description={description}
         aria-disabled={withheld || undefined}
-        data-link-label={label ?? ""}
+        data-link-label={current ?? label ?? ""}
         data-panel-target={panelTarget ? url : undefined}
         title={
           withheld
