@@ -71,6 +71,20 @@
     opacity: 0;
   }
 
+  /* On the row's pill the action darkens instead of gaining its own fill. */
+  .teamRow
+    > .teamRowSlot
+    > [data-solo-channel-new-task]:is(:hover, :active):not([data-disabled]) {
+    background: transparent;
+    color: var(--text-navigation);
+  }
+
+  /* The row stays highlighted while the pointer is on its controls. */
+  .teamRow:has(> .teamRowSlot > :not(.teamRowBody):hover)
+  > :first-child:not([data-selected])::before {
+    background: var(--affordance-panel-hover);
+  }
+
   /* The disclosure takes the row icon's place while the row is pointed at
      or holds keyboard focus. */
   .teamRowSlot > [data-solo-disclosure] {
