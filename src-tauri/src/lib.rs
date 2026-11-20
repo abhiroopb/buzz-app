@@ -23,6 +23,7 @@ use browser::{
 };
 mod agent_state;
 mod app_agents;
+mod build_identity;
 mod decisions;
 mod deep_links;
 mod dock;
@@ -778,6 +779,7 @@ fn commands<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
         federated_identity::socket::relay_socket_close,
         draft_diagnostics::draft_diagnostics_save,
         web_inspector::web_inspector,
+        build_identity::get_build_identity,
         relay_sign,
         relay_decode_read_state,
         relay_sign_read_state,
@@ -818,6 +820,9 @@ fn commands<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
         relay_upload_cancel,
         file_download,
         media_download,
+        relay::media_cache_clear,
+        relay::media_cache_forget,
+        relay::media_cache_usage,
         media_copy_image,
         media_lift_subject,
         subject_lift::media_lift_subject_supported,
@@ -1001,7 +1006,7 @@ pub fn run() {
             },
         )
         .and_then(|instance| {
-            sign_out::forget_signed_out_key(&instance, identity::remove_current_key)
+            sign_out::forget_signed_out_key(&instance, &paths, identity::remove_current_key)
                 .map(|()| instance)
         })
         .unwrap_or_else(|message| sign_out::exit_with(&message))
@@ -1114,6 +1119,12 @@ pub fn run() {
             }
             deep_links::setup(app.handle());
             mesh_compute::setup(app.handle());
+            app.manage(relay::MediaCache::new(
+                app.path()
+                    .app_cache_dir()
+                    .ok()
+                    .map(|path| path.join(relay::MEDIA_CACHE_DIR)),
+            ));
             app.manage(relay::Spools::new(
                 app.path()
                     .app_cache_dir()

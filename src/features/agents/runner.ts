@@ -488,6 +488,7 @@ export type RunnerHost = {
   ownershipChanged?(): void;
   /** A failed watch read set or cleared its retry status. */
   watchReadFailuresChanged(): void;
+  transitionChanged?(): void;
   /** The agent, while its community is live to run it in. */
   ready(key: AgentKey): Agent | undefined;
   /** Whether the agent's community is reloading in place: it starts nothing
@@ -646,9 +647,12 @@ export type RunnerHost = {
     channelId: string,
     root?: string,
   ): ReturnType<NonNullable<AgentHandle["conversationInstructions"]>>;
-  /** The choices for the sections of the agent's base prompt. */
+  /** The choices for the sections of the agent's base prompt, in one
+   * conversation when the prompt is for its session. */
   promptSections?(
     agent: Agent,
+    channelId?: string,
+    root?: string,
   ): ReturnType<NonNullable<AgentHandle["promptSections"]>>;
   /** The owner's channel templates as the agent's handle offers them. */
   templates(agent: Agent): ReturnType<AgentHandle["templates"]>;
@@ -1149,6 +1153,19 @@ export class AgentRunners {
         );
     });
   }
+  /** Process liveness is independent of the temporary pause on handle calls
+   * during a harness switch. The runner signal still retires the command when
+   * the saved type, plugin, or protection changes. */
+  attentionCommandCurrent(key: AgentKey) {
+    const runner = this.runners.get(key);
+    const signal = runner?.controller.signal;
+    return () =>
+      signal?.aborted === false &&
+      this.runners.get(key) === runner &&
+      this.runs(key) &&
+      !!this.host.ready(key) &&
+      this.host.attentionShown();
+  }
   /** Whether another copy of the app runs an agent this one could. */
   yielded(key: AgentKey) {
     const runner = this.runners.get(key);
@@ -1223,6 +1240,7 @@ export class AgentRunners {
         other.transitioning = false;
         void this.drain(other);
       }
+      this.host.transitionChanged?.();
     }
   }
   /** Retires every runner, as when the host stops. */
@@ -2513,11 +2531,12 @@ export class AgentRunners {
       count(-1);
     };
     const lifetime = runner.controller.signal;
-    // Whether this runner, as it is now, should still act on the event.
-    const live = () =>
-      !lifetime.aborted &&
+    // Source output belongs to its watch registration, which can survive a
+    // harness change. Event classification still belongs to its original run.
+    const sameRunner = () =>
       this.runners.get(runner.key) === runner &&
-      this.stillCurrent(runner, job);
+      (trigger.type === "source" || !lifetime.aborted);
+    const live = () => sameRunner() && this.stillCurrent(runner, job);
     // Checked as non-null by the caller.
     const classifier = trigger.watch.classifier as NonNullable<
       EventWatch["classifier"]
@@ -2538,8 +2557,7 @@ export class AgentRunners {
       try {
         await previous;
         const results = await outcomes;
-        // A retired or replaced runner keeps none of its work.
-        if (lifetime.aborted || this.runners.get(runner.key) !== runner) return;
+        if (!sameRunner()) return;
         unreserve();
         if (trigger.type === "watch" || trigger.type === "source") {
           const [result] = results;
@@ -3725,7 +3743,8 @@ export class AgentRunners {
         instructions: () => this.host.instructions?.(agent) ?? [],
         conversationInstructions: (channelId: string, root?: string) =>
           this.host.conversationInstructions?.(agent, channelId, root),
-        promptSections: () => this.host.promptSections?.(agent) ?? {},
+        promptSections: (channelId?: string, root?: string) =>
+          this.host.promptSections?.(agent, channelId, root) ?? {},
         tabs: () => this.host.tabs(agent),
         // Only a run's: a plugin acting through the agent doesn't get them.
         ...(settings && { settings }),
