@@ -85,7 +85,10 @@ import { Switch } from "../../../../src/shared/design-system/ui/Switch";
 import { PreferenceRow } from "../../../../src/shared/design-system/ui/PreferenceRow";
 import { Select } from "../../../../src/shared/design-system/ui/Select";
 import { SwitchPreferenceRow } from "../../../../src/shared/design-system/ui/SwitchPreferenceRow";
-import { Accordion } from "../../../../src/shared/design-system/ui/Accordion";
+import {
+  Accordion,
+  AccordionScrollContent,
+} from "../../../../src/shared/design-system/ui/Accordion";
 
 import { Avatar } from "../../../../src/shared/design-system/ui/Avatar";
 import { AvatarStack } from "../../../../src/shared/design-system/ui/AvatarStack";
@@ -2529,8 +2532,9 @@ export const COMPONENT_SPECIMENS: Record<string, () => ReactNode> = {
     </div>
   ),
   "preference-row": SwitchSpecimen,
-  accordion: () => (
+  accordion: () => [
     <SpecimenFrame
+      key="standard"
       code={`<Accordion
   animate
   items={[
@@ -2677,8 +2681,122 @@ export const COMPONENT_SPECIMENS: Record<string, () => ReactNode> = {
           },
         ]}
       />
-    </SpecimenFrame>
-  ),
+    </SpecimenFrame>,
+    <SpecimenGroup
+      key="expanded-settings"
+      label="Settings disclosures with an expanded card"
+      code={`<SettingsGroup>
+  <Accordion
+    variant="settings"
+    expandedFill
+    items={[
+      {
+        value: "Publishing",
+        title: "Publishing",
+        content: (
+          <div className="grid gap-3 pb-3">
+            <AccordionScrollContent>
+              <p>Publishing instructions go here.</p>
+            </AccordionScrollContent>
+            <div>
+              <Button size="sm" variant="outline">Restore default</Button>
+            </div>
+          </div>
+        ),
+      },
+    ]}
+  />
+</SettingsGroup>`}
+    >
+      <section
+        aria-label="Settings disclosures with an expanded card"
+        className="mx-auto w-full max-w-lg"
+      >
+        <SettingsGroup>
+          <Accordion
+            variant="settings"
+            expandedFill
+            items={[
+              {
+                value: "Response style",
+                title: "Response style",
+                content: (
+                  <p className="m-0 pb-3 text-body-sm">
+                    Use plain language and lead with the result.
+                  </p>
+                ),
+              },
+              {
+                value: "Publishing",
+                title: "Publishing",
+                triggerDescription: "Default instructions",
+                content: (
+                  <div className="grid min-w-0 gap-3 pb-3">
+                    <AccordionScrollContent>
+                      <div className="grid gap-4 text-body-sm">
+                        <p className="m-0">
+                          Before sharing a document, identify the audience and
+                          check who has access. Use the destination the
+                          requester named and confirm the people who need to act
+                          on it.
+                        </p>
+                        <p className="m-0">
+                          Open the final copy and check that it contains the
+                          agreed changes. Make sure links work for the intended
+                          audience and captions explain the attached images.
+                        </p>
+                        <p className="m-0">
+                          Give the recipient enough context to understand the
+                          decision. Put the requested action near the top and
+                          keep details about implementation in the document.
+                        </p>
+                        <p className="m-0">
+                          For a change that needs approval, use the existing
+                          review flow. Keep related feedback with the document
+                          so reviewers can see the questions and their answers.
+                        </p>
+                        <p className="m-0">
+                          Check that the final version uses the agreed title and
+                          that other versions still have a clear purpose.
+                          Preserve links that teammates already use.
+                        </p>
+                        <p className="m-0">
+                          After publishing, open the shared link and verify that
+                          it shows the expected version. Report the outcome
+                          where the request was made.
+                        </p>
+                      </div>
+                    </AccordionScrollContent>
+                    <div>
+                      <Button size="sm" variant="outline">
+                        Restore default
+                      </Button>
+                    </div>
+                  </div>
+                ),
+              },
+            ]}
+          />
+          <Accordion
+            variant="settings"
+            items={[
+              {
+                value: "Working notes",
+                title: "Working notes",
+                content: (
+                  <AccordionScrollContent>
+                    <p className="m-0 text-body-sm">
+                      Keep decisions next to the work they affect.
+                    </p>
+                  </AccordionScrollContent>
+                ),
+              },
+            ]}
+          />
+        </SettingsGroup>
+      </section>
+    </SpecimenGroup>,
+  ],
   "empty-state": () => (
     <div className="grid gap-8">
       <SpecimenFrame

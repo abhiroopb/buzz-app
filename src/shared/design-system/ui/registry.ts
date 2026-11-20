@@ -902,6 +902,7 @@ export const COMPONENTS: readonly ComponentDefinition[] = [
       "default",
       "form",
       "settings",
+      "settings with expanded card",
       "navigation",
       "activity",
       "section (proposed): InlineHeader type and unindented content",

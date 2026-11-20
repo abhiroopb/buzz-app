@@ -1122,7 +1122,8 @@
      cutting content at a hard line. `always` feathers both edges, as message
      history does; `scrolled` feathers only an edge with content past it, so a
      list at rest keeps its first row crisp. Set `data-scroll-fade` on the
-     scroller; `scrolled` also needs `useScrollEdges("block")` on it. A host
+     scroller; `end` feathers only the bottom. Both conditional modes need
+     `useScrollEdges("block")`. A host
      that cannot mark its scroller applies `--scroll-fade-always` itself. */
   :root {
     --scroll-fade: var(--space-4);
@@ -1158,7 +1159,8 @@
   [data-scroll-fade="scrolled"][data-overflow-start]:not([data-overflow-end]) {
     mask-image: var(--scroll-fade-start);
   }
-  [data-scroll-fade="scrolled"][data-overflow-end]:not([data-overflow-start]) {
+  [data-scroll-fade="scrolled"][data-overflow-end]:not([data-overflow-start]),
+  [data-scroll-fade="end"][data-overflow-end] {
     mask-image: var(--scroll-fade-end);
   }
 
@@ -2877,6 +2879,19 @@
   .buzz-accordion-trigger[aria-expanded="true"] > svg {
     transform: rotate(180deg);
   }
+  .buzz-accordion-scroll {
+    max-block-size: var(
+      --settings-accordion-content-max-height,
+      min(20rem, 40dvh)
+    );
+    overflow-y: auto;
+  }
+  html[data-keyboard-navigation] .buzz-accordion-scroll:focus-visible {
+    /* Keep the complete inset ring visible while scrolling by keyboard. */
+    mask-image: none;
+    outline: 2px solid var(--border-focus);
+    outline-offset: -2px;
+  }
   .buzz-accordion[data-variant="settings"] .buzz-accordion-item {
     border: 1px solid var(--border-standard);
     border-radius: var(--radius-container);
@@ -2943,6 +2958,9 @@
   }
   html[data-keyboard-navigation]
     .buzz-accordion[data-variant="settings"]
+    :is(.buzz-accordion-panel, .buzz-accordion-trigger > svg),
+  html[data-keyboard-input]
+    .buzz-accordion[data-variant="settings"][data-expanded-fill]
     :is(.buzz-accordion-panel, .buzz-accordion-trigger > svg) {
     transition: none;
   }

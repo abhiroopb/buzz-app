@@ -79,6 +79,94 @@
     .buzz-accordion-content {
     padding-block-start: 0;
   }
+  .buzz-settings-group[data-layout="rows"]
+    > .buzz-accordion[data-variant="settings"][data-expanded-fill] {
+    --settings-disclosure-gutter: min(
+      var(--settings-group-inset),
+      var(--space-half)
+    );
+    --settings-disclosure-inset: calc(
+      var(--settings-group-inset) -
+      var(--settings-disclosure-gutter)
+    );
+
+    > .buzz-accordion-item {
+      position: relative;
+      isolation: isolate;
+      margin-inline: var(--settings-disclosure-gutter);
+      padding-block: var(--settings-disclosure-gutter);
+    }
+
+    > .buzz-accordion-item + .buzz-accordion-item {
+      border-block-start: 1px solid var(--border-standard);
+    }
+
+    /* A card supplies its own border along adjoining disclosure rows. */
+    &:has(> .buzz-accordion-item:first-child[data-open]),
+    &:has(> .buzz-accordion-item:last-child[data-open])
+      + .buzz-accordion[data-variant="settings"],
+    > .buzz-accordion-item[data-open],
+    > .buzz-accordion-item[data-open] + .buzz-accordion-item {
+      border-block-start-color: transparent;
+    }
+
+    > .buzz-accordion-item::before {
+      content: "";
+      position: absolute;
+      z-index: -1;
+      inset: 0;
+      border: 1px solid var(--border-standard);
+      border-radius: var(--radius-container);
+      background: var(--affordance-subtle-hover);
+      box-shadow: var(--shadow-sm);
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    > .buzz-accordion-item[data-open]::before {
+      inset-inline: calc(
+        0px -
+        var(--settings-disclosure-gutter) -
+        var(--space-4)
+      );
+      opacity: 1;
+    }
+
+    > .buzz-accordion-item > .buzz-accordion-heading > .buzz-accordion-trigger {
+      padding-inline: var(--settings-disclosure-inset);
+      border-radius: var(--radius-row);
+
+      &:focus-visible {
+        outline-color: var(--border-focus);
+        outline-offset: -2px;
+      }
+
+      :where(html:not([data-keyboard-navigation])) &:focus-visible {
+        outline: none;
+      }
+
+      &[aria-expanded="true"]:hover {
+        background: transparent;
+      }
+    }
+
+    > .buzz-accordion-item > .buzz-accordion-panel {
+      > .buzz-accordion-content,
+      > div > .buzz-accordion-content {
+        padding-inline: var(--settings-disclosure-inset);
+      }
+    }
+
+    @media (prefers-reduced-motion: no-preference) {
+      :where(html:not([data-keyboard-input], [data-keyboard-navigation]))
+        &
+        > .buzz-accordion-item::before {
+        transition:
+          inset-inline var(--duration-settle) var(--easing-settle),
+          opacity var(--duration-settle) var(--easing-settle);
+      }
+    }
+  }
   .buzz-settings-group[data-layout="form"] {
     display: grid;
     grid-template-columns: minmax(0, 1fr);

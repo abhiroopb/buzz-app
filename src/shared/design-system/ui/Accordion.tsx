@@ -2,6 +2,23 @@ import { Accordion as BaseAccordion } from "@base-ui/react/accordion";
 import { CaretDownIcon } from "../icons/index";
 import type { ReactNode } from "react";
 import { motion, useReducedMotion } from "motion/react";
+import { useScrollEdges } from "./useScrollEdges";
+
+/** A bounded reading area within a Settings disclosure. Place actions after it. */
+export function AccordionScrollContent({ children }: { children: ReactNode }) {
+  const edges = useScrollEdges("block");
+  return (
+    <div
+      ref={edges}
+      className="buzz-accordion-scroll"
+      data-scroll-fade="end"
+      // biome-ignore lint/a11y/noNoninteractiveTabindex: Plain-text content needs a keyboard scroll target.
+      tabIndex={0}
+    >
+      <div>{children}</div>
+    </div>
+  );
+}
 
 /** Accessible disclosure groups. Base UI owns expansion and keyboard behavior. */
 export function Accordion({
@@ -13,10 +30,12 @@ export function Accordion({
   headingLevel = 3,
   keepMounted = false,
   animate = false,
+  expandedFill = false,
 }: {
   items: readonly {
     value: string;
     title: ReactNode;
+    triggerDescription?: string | undefined;
     content: ReactNode;
   }[];
   defaultValue?: string[];
@@ -34,6 +53,8 @@ export function Accordion({
   keepMounted?: boolean;
   /** Animate supporting detail panels; keyboard and reduced motion stay immediate. */
   animate?: boolean;
+  /** Give expanded Settings rows a wider card inside a row-layout SettingsGroup. */
+  expandedFill?: boolean;
 }) {
   const reducedMotion = useReducedMotion();
   return (
@@ -42,6 +63,7 @@ export function Accordion({
       className="buzz-accordion"
       data-variant={variant}
       data-animate={animate || undefined}
+      data-expanded-fill={(variant === "settings" && expandedFill) || undefined}
       defaultValue={defaultValue}
       value={value}
       onValueChange={onValueChange}
@@ -67,6 +89,7 @@ export function Accordion({
             <BaseAccordion.Trigger
               className={`buzz-accordion-trigger ${variant === "section" ? "text-label-sm" : "text-body"}`}
               aria-label={variant === "settings" ? item.value : undefined}
+              aria-description={item.triggerDescription}
             >
               <span>{item.title}</span>
               <CaretDownIcon size={14} aria-hidden="true" />
@@ -82,8 +105,10 @@ export function Accordion({
                     const instant =
                       reducedMotion ||
                       (typeof document !== "undefined" &&
-                        document.documentElement.hasAttribute(
-                          "data-keyboard-navigation",
+                        document.documentElement.matches(
+                          expandedFill && variant === "settings"
+                            ? "[data-keyboard-input], [data-keyboard-navigation]"
+                            : "[data-keyboard-navigation]",
                         ));
                     return (
                       <div {...props}>
