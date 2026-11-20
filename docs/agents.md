@@ -578,8 +578,10 @@ settles on the head commit, once per commit and result and again when a failure
 is run again, or when new feedback has been quiet for 90 seconds, and once more
 when the pull request merges or closes, so the agent can finish and retire its
 Interest. It also wakes for what nothing else would on the way to merging:
-merge conflicts; checks pending on one commit for 3 hours; an approved, green
-pull request that must catch up with its base; auto-merge turned off, or the
+merge conflicts; checks pending on one commit for 3 hours; losing its approval
+(GitHub wants a review again; it waits for running checks until they count as
+stuck, and changes requested come as that review's feedback instead); an
+approved, green pull request that must catch up with its base; auto-merge turned off, or the
 pull request leaving the merge queue, while it is open; and looking ready to
 merge (approved, checks that block merging passed, no conflicts or unresolved
 review threads, not a draft, auto-merge off). Recovering wakes nothing, a merge
@@ -1842,6 +1844,28 @@ Chromium and WebKit. These use ephemeral identities and synthetic telemetry.
 Packaged GUI quit/relaunch, real-relay agent ownership admission and hosted
 cross-platform checks are separate gates; consult the pull request for results
 tied to its head.
+
+## Relayed messages
+
+A plugin that relays an agent's text into another conversation as the agent's
+owner tags the kind 9 message `["relayed-from", <agent pubkey>, <source channel id>]`.
+The source channel is optional, and the plugin sends it to every audience so
+every member sees the same row. Content up to and including the first blank
+line is the relaying sender's notice for clients that do not read the tag.
+
+The app honours the tag only while the agent's cryptographically verified owner
+(`profiles.queries.owner`) signed the message as its author, and only for one
+well-formed tag naming someone other than the signer. A relay-signed message
+attributed to the owner does not qualify. The row omits the signed original's
+notice only while the shown text, after any edit, still starts with it. `relayedFrom.verified`
+records that check in the fold, which refolds when the owner verdict changes.
+`rowProfileIds` includes the claimed agent so its profile, and with it the
+verdict, loads with the row. A verified row is drawn as the agent's collapsed
+line without the notice, never right-aligned as the viewer's own and never
+grouped with the author's messages. It names the source chat only when it is
+in the viewer's joined list. Unverified, conflicting or malformed claims leave
+an ordinary message with its notice. The content is unchanged for every other
+consumer, including unread counts and agent context.
 
 ## Shared identity names
 

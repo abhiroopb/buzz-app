@@ -77,6 +77,8 @@ export type HarnessKit = Readonly<{
   ): Promise<HarnessConversation | undefined>;
   /** Buzz's system prompt for the agent: the base prompt, its session model,
    * `instructions`, its teams, its `core` memory and repositories folder.
+   * The owner can change the base prompt's sections in Settings, so build it
+   * again before each turn and give the session the new text when it differs.
    * `tools: false` is for a session without the Buzz tools, whose final
    * message the harness posts as its reply. */
   systemPrompt(
@@ -298,6 +300,7 @@ export function harnessKit(sources: Sources): HarnessKit {
         instructions,
         team: team ?? "",
         ...(memory === undefined ? {} : { memory }),
+        sections: agent.promptSections?.(),
       });
       return tools ? text : `${text}\n\n${NO_TOOLS}`;
     },

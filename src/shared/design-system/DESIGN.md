@@ -1636,7 +1636,9 @@ Selected rows can expand without painting the entire branch in the accent color.
 Its `text` variant is a text-only row action, such as a capped list's Show
 more and Show fewer: the base navigation item's type and padding with no fill, resting in
 `--text-subtle` and strengthening to `--text-standard` on hover and keyboard
-focus. Use it where a fill would read as another destination.
+focus. Use it where a fill would read as another destination. A capped list
+puts both on one line: **Show more**, with a leading caret, on the row icons and
+titles, and **Show fewer** at the end, ending where row trailing content ends.
 
 PreviewCard may expose supplemental actions through `actionRef`, such as copying
 an identity's full npub. Focus opens every preview at once, so immediate Tab
@@ -1847,7 +1849,7 @@ after release, and prevent a drag from selecting text it passes over.
 
 Keep blur fixed during general surface transitions; animate opacity instead.
 The form dropdown, menu, popover, and tooltip sections document narrow,
-designer-requested blur exceptions. Respect each component’s keyboard and
+designer-requested blur exceptions. The front desktop toast also sharpens from 2px blur on entry and returns to 2px on ordinary dismissal. This treatment requires a fine pointer, hover, and full motion. On Linux WebKitGTK the toast uses slide, scale, and opacity only because animating blur can crash the renderer. Respect each component’s keyboard and
 reduced-motion treatment.
 
 ## Colour structure
