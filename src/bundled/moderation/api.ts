@@ -19,8 +19,7 @@ export type Invite = {
   invite_id: string;
   code: string;
   url: string;
-  /** Unix seconds, or null for a link that never expires. */
-  expires_at: number | null;
+  expires_at: number;
   max_uses: number | null;
   uses_remaining: number | null;
 };
@@ -29,7 +28,7 @@ export type InviteSummary = {
   id: string;
   created_by: string;
   created_at: number;
-  expires_at: number | null;
+  expires_at: number;
   max_uses: number | null;
   use_count: number;
   revoked_at: number | null;
@@ -56,19 +55,11 @@ export function allowedActions(
   return [target.role === "admin" ? "demote" : "promote", "remove"];
 }
 
-/** Mints a link; a null `ttl_secs` makes one that never expires. */
 export const mintInvite = (
   community: string,
-  ttl_secs: number | null,
+  ttl_secs: number,
   max_uses: number | null,
-) =>
-  communityRequest<Invite>(
-    community,
-    "invite",
-    ttl_secs === null
-      ? { never_expires: true, max_uses }
-      : { ttl_secs, max_uses },
-  );
+) => communityRequest<Invite>(community, "invite", { ttl_secs, max_uses });
 
 /** One page of the community's invites, newest first. */
 export const listInvites = (community: string, before?: string) =>

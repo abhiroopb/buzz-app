@@ -21,8 +21,7 @@ const STATUS: Record<InviteSummary["status"], string> = {
 };
 
 /** How a link's expiry reads wherever it is shown. */
-export function inviteExpiry(expiresAt: number | null) {
-  if (expiresAt === null) return "Never expires";
+export function inviteExpiry(expiresAt: number) {
   const date = new Date(expiresAt * 1000).toLocaleString(undefined, {
     dateStyle: "medium",
     timeStyle: "short",
