@@ -1,9 +1,10 @@
-.group {
+.group,
+.teamRow {
   container: solo-channel-group / inline-size;
 }
 
 @container solo-channel-group (max-width: 9rem) {
-  .group
+  :is(.group, .teamRow)
     [data-solo-channel-new-task]:not(
       [data-has-metadata] *,
       [data-reserve-space] *:focus

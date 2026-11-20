@@ -69,9 +69,14 @@ function revealCurrent(viewport: HTMLElement, sectionKey?: string) {
       )
     : viewport;
   if (!section) return;
-  const owners = [
-    ...section.querySelectorAll<HTMLElement>('[aria-current="page"]'),
-  ].map((entry) => {
+  const current = (root: HTMLElement, within = "") => [
+    ...root.querySelectorAll<HTMLElement>(`${within}[aria-current="page"]`),
+  ];
+  let entries = current(section);
+  // A region's channel group can show its rows with a Team row instead.
+  if (!entries.length && sectionKey)
+    entries = current(viewport, "[data-team-row-channel-group] ");
+  const owners = entries.map((entry) => {
     let owner = entry;
     for (let node: HTMLElement | null = entry; node && node !== viewport; ) {
       if (node.hidden) {

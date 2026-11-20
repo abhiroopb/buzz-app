@@ -13,6 +13,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it, vi } from "vitest";
 import { useState } from "react";
 import type { SoloRegionProps } from "../../features/channel-navigation/solo-navigation-contract";
+import type { SidebarRows } from "../../features/channel-navigation/sidebar-rows-service";
 import { stubAvatarBrowserApis } from "../../features/agents/avatar-testing";
 import { readView, writeView } from "../../shared/view-state";
 import {
@@ -922,12 +923,38 @@ it("shows a region channel group with its Team row", async () => {
   }
   const source = await h.register({ title: "Nexus", component: Body });
   expect(source.handle.teamRowChannelGroups).toBe(true);
+  let rows: ReturnType<SidebarRows["snapshot"]> = [];
+  const rowListeners = new Set<() => void>();
+  const hide = (hidden: boolean) => {
+    rows = hidden
+      ? [
+          {
+            version: 1,
+            id: "hide-source",
+            key: "example/hide-source",
+            pluginId: "example",
+            revision: "1",
+            render: (item, Default) => (item.id === "source" ? null : Default),
+          },
+        ]
+      : [];
+    for (const listener of rowListeners) listener();
+  };
   const view = render(
     <ToastProvider>
       <PrimarySidebar
         relay={h.relay}
         navigator={h.navigator}
         target={conversationTarget(h.scope, "chat")}
+        sidebarRows={{
+          version: 1,
+          snapshot: () => rows,
+          subscribe(listener) {
+            rowListeners.add(listener);
+            return () => rowListeners.delete(listener);
+          },
+          register() {},
+        }}
       >
         {null}
       </PrimarySidebar>
@@ -976,21 +1003,25 @@ it("shows a region channel group with its Team row", async () => {
       screen.getByRole("textbox", { name: "Task draft" }),
     );
 
-    // A group without its Team row shows nothing, in either place.
-    await act(() =>
-      h.roster(
-        h.session.channels
-          .list()
-          .channels.map((channel) =>
-            channel.id === "source" ? { ...channel, members: [] } : channel,
-          ),
-        "ready",
+    // The wrapped row is still the channel's own row.
+    await user.click(row() as HTMLElement);
+    await waitFor(() =>
+      expect(h.navigator.snapshot().entry.target).toEqual(
+        conversationTarget(h.scope, "source"),
       ),
     );
+
+    // A contribution that hides the row hides its group with it, in both places.
+    await act(() => hide(true));
+    expect(row()).toBeNull();
+    expect(group()).toBeNull();
     expect(
       screen.queryByRole("textbox", { name: "Task draft" }),
     ).not.toBeInTheDocument();
-    expect(group()).toBeNull();
+    await act(() => hide(false));
+    expect(group()).toContainElement(
+      screen.getByRole("textbox", { name: "Task draft" }),
+    );
   } finally {
     view.unmount();
     await h.dispose();

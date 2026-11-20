@@ -184,9 +184,11 @@ are unused. The host adds the disclosure and the New task action beside that row
 and the group's content beneath it, under the same access rules. Content stays
 mounted while collapsed.
 
-The group shows only while that Team row is mounted. A collapsed Team section,
-a restricted sidebar or a row hidden by a `sidebarRows` contribution shows
-nothing, and the content unmounts. Row contributions receive the row and its
+The group shows only with that Team row. A collapsed Team section hides the
+group with its row and keeps the content mounted. Without a mounted row, as in
+a restricted sidebar, under a section filter that omits the channel or behind a
+`sidebarRows` contribution that hides it, nothing renders and the content
+unmounts. Row contributions receive the row and its
 group as one `Default` element. Channels that fail the checks above still render
 nothing, so keep the source's own presentation for them. When several groups ask
 for one channel, the first mounted takes the row and the others render in the
