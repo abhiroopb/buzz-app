@@ -890,8 +890,9 @@ function Dashboard({
               </ul>
               <p className={styles.footnote} role="note">
                 <InfoIcon size="0.875rem" aria-hidden="true" />
-                Other includes turns run while Usage was off, and the timers and
-                watches of an agent with one session per community.
+                Other includes Claude Code, goose and Pi turns run while Usage
+                was off, and the timers and watches of an agent with one session
+                per community.
               </p>
             </section>
           )}

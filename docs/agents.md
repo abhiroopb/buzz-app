@@ -2023,9 +2023,10 @@ are saved as one value, and a day's value is removed once all of it is past
 keeping, by the agent's next standalone turn. Each session is added to the
 record whether or not Usage is on, as its id and start time only, never its
 prompt or reply; the key of the timer or watch that started it is kept with it
-only while the Usage plugin is on (its settings card is registered), so a turn
-run while Usage was off is counted once Usage is on, under "Other" in "By
-routine" when that list shows. Removing the agent removes the record. The
+only while the Usage plugin is on (its settings card is registered), so a
+Claude, Goose or Pi turn run while Usage was off is counted once Usage is on,
+under "Other" in "By routine" when that list shows; Codex keeps no session for
+such a turn, so it is not counted. Removing the agent removes the record. The
 snapshot has no `channelId`, and a session from before that record was kept is
 not counted.
 

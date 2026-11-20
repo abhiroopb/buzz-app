@@ -218,7 +218,8 @@ it("keeps the key of the turn that started a session, alongside ones without", a
 
 it("keeps a session whose saved turn key is damaged, without its key", async () => {
   const storage = memory();
-  const at = Date.now();
+  // Midday UTC, so every entry and the later add share one day's value.
+  const at = Date.UTC(2026, 0, 15, 12);
   const key = `${STANDALONE_PREFIX}goose:${AGENT}:${Math.floor(at / DAY)}`;
   const saved = [
     ["good", at, "watch/pr"],
