@@ -182,7 +182,9 @@ region. With it, the channel's own Team sidebar row is the heading and keeps its
 selection, unread state, menus, dragging and focus, so `selected` and `onSelect`
 are unused. The host adds the disclosure and the New task action beside that row
 and the group's content beneath it, under the same access rules. Content stays
-mounted while collapsed.
+mounted while collapsed. The row has no group header, so `headerLeading`,
+`headerAccessory` and `headerMetadata` are not shown there; offer those controls
+in the content when the group uses this placement.
 
 The group shows only with that Team row. A collapsed Team section hides the
 group with its row and keeps the content mounted. Without a mounted row, as in

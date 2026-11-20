@@ -275,7 +275,9 @@ export function RegionChannelGroup(props: SoloChannelGroupProps) {
       onClick={newTask}
     />
   );
-  const leading = props.headerLeading;
+  const inTeamRow = !!teamRows && (!teamRow?.owner || teamRow.owner === owner);
+  // The Team row's own icon is its leading slot: header extras stay in the region.
+  const leading = inTeamRow ? undefined : props.headerLeading;
   const activateLeading = () => {
     if (eligible(current())) leading?.onActivate();
   };
@@ -304,7 +306,7 @@ export function RegionChannelGroup(props: SoloChannelGroupProps) {
     </div>
   );
   // A second group asking for the same row renders in place.
-  if (teamRows && (!teamRow?.owner || teamRow.owner === owner))
+  if (inTeamRow)
     return portalSlot
       ? createPortal(
           <>

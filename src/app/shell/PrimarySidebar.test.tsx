@@ -916,6 +916,11 @@ it("shows a region channel group with its Team row", async () => {
           disclosureLabel="Toggle Source tasks"
           onToggle={() => setExpanded(!expanded)}
           onNewTask={create}
+          headerLeading={{
+            icon: <span>Lead</span>,
+            label: "Open Lead",
+            onActivate() {},
+          }}
           {...(inline ? { placement: "team-row" as const } : {})}
         >
           <input aria-label="Task draft" />
@@ -980,6 +985,10 @@ it("shows a region channel group with its Team row", async () => {
       view.container.querySelectorAll("[data-solo-channel-group]"),
     ).toHaveLength(0);
     expect(screen.getAllByText("Source")).toHaveLength(1);
+    // The row keeps a plain caret: the region's leading action stays there.
+    expect(
+      screen.queryByRole("button", { name: "Open Lead" }),
+    ).not.toBeInTheDocument();
     const disclosure = screen.getByRole("button", {
       name: "Toggle Source tasks",
     });
@@ -1000,6 +1009,9 @@ it("shows a region channel group with its Team row", async () => {
     expect(
       view.container.querySelector('[data-solo-channel-group="source"]'),
     ).toContainElement(screen.getByRole("textbox", { name: "Task draft" }));
+    expect(
+      screen.getByRole("button", { name: "Open Lead" }),
+    ).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Move tasks" }));
     expect(group()).toContainElement(
       screen.getByRole("textbox", { name: "Task draft" }),
