@@ -1165,7 +1165,7 @@ it("keeps focus on the confirm action after a refused revoke", async () => {
   const held = new Promise<Response>((resolve) => {
     finish = resolve;
   });
-  broker({
+  const calls = broker({
     invites: () => Response.json({ invites: [link(1)], next_before: null }),
     "invite-revoke": () => held,
   });
@@ -1178,6 +1178,12 @@ it("keeps focus on the confirm action after a refused revoke", async () => {
   const action = within(dialog).getByRole("button", { name: "Revoke" });
   action.focus();
   await user.keyboard("{Enter}");
+  const revokes = () => calls.filter((c) => c.route === "invite-revoke");
+  await waitFor(() => expect(revokes()).toHaveLength(1));
+  // A second Enter and a click on the busy action send nothing more.
+  await user.keyboard("{Enter}");
+  await user.click(action);
+  expect(revokes()).toHaveLength(1);
   // While loading, the action stays focusable (a disabled button drops focus to
   // the body in browsers) and blocks a second submit.
   await waitFor(() => expect(action).toHaveAttribute("aria-busy", "true"));
