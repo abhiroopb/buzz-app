@@ -74,8 +74,8 @@ performs DNS verification. Ordinary human profiles have no agent fields.
 ## Archived keys
 
 When the community's archive snapshot lists the identity, the profile says
-"This key is archived in this community." When the relay's newest archive delta
-for the key names a replacement (see [agents.md](agents.md#relay-scoped-archive-display)),
+"This key is archived in this community." When that snapshot also names a
+replacement for the key (see [agents.md](agents.md#relay-scoped-archive-display)),
 it says "This key was replaced by" with the new key's name as a link that opens
 its profile in the same slot; an owned agent's profile asks before it leaves
 unsaved edits, and discards them when the viewer chooses to, also where the

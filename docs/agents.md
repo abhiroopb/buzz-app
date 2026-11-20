@@ -1335,22 +1335,18 @@ history or channel membership. `not-archived` means absent from the read snapsho
 owned, authorized or guaranteed current at a later write. Packaged/live
 acceptance remains separate.
 
-The profile notice is the one delta reader. Each profile opening rereads the
-13535 snapshot, and so does showing a retained profile tab again: selecting
-its tab, opening its collapsed dock, or closing the dock that covered it. A
-hidden tab reads nothing. After a dropped connection is established again,
-the store rereads a snapshot that a view subscribes to and that the drop left
-stale, failed or still retrying. While
-that snapshot lists the key, and no reread is in progress,
-`session.archives.replacement(pubkey)` makes one background read of kinds
-8002/8003 from the same authority with `#p` = the key and limit 3. Every
-caller under the same snapshot read shares that read; the next snapshot read
-asks again. Only a
-well-formed archive delta names a replacement: kind 8002, one `-`, one `p` equal
-to the key, one `consent` with a NIP-IA path, and one `replaced-by` that is a
-different valid key. A newer 8003, a malformed newest delta, newest-second ties
-that disagree, or a full page of ties name none. A replacement counts only under
-the snapshot it was read with. It is presentation, never access or proof.
+The profile notice takes "archived" and "replaced by" from the same 13535
+snapshot: a `p` entry's third element names the key's replacement. The app
+reads no 8002/8003 deltas. A replacement counts only when it is a valid key,
+differs from the archived key, and every entry for that key agrees; otherwise
+the notice names none. A relay that lists bare keys gives the plain notice.
+Each profile opening rereads the snapshot, and so does showing a retained
+profile tab again: selecting its tab, opening its collapsed dock, closing the
+dock that covered it, or returning to the Agents tab that keeps it. A hidden
+tab reads nothing. After a dropped connection is established again, the store
+rereads the snapshot once for the views it serves. A failed reread keeps the
+last known notice and link, as every archive surface keeps its last snapshot.
+The replacement is presentation, never access or proof.
 
 `session.archives.request("archive" | "unarchive", pubkey)` sends exact 9035/9036
 requests (`["-"]`, one `p`, optional `auth`) through the session's signer and
