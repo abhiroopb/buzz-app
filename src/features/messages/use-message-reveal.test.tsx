@@ -5,6 +5,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import styles from "./Messages.module.css";
 import { HIGHLIGHT_MAX_WAIT_MS, HIGHLIGHT_QUIET_MS } from "./message-highlight";
 import { useMessageReveal } from "./use-message-reveal";
+import { useArrivalAnnouncement } from "./ArrivalAnnouncement";
 
 // Control frame/mutation ordering; browser journeys own real layout and inert focus.
 const frames = new Map<number, FrameRequestCallback>();
@@ -56,7 +57,15 @@ async function idle() {
 }
 function mount(
   hold?: () => boolean,
-  { focus, mark }: { focus?: boolean; mark?: boolean } = {},
+  {
+    focus,
+    mark,
+    arrived,
+  }: {
+    focus?: boolean;
+    mark?: boolean;
+    arrived?: (row: HTMLElement) => void;
+  } = {},
 ) {
   const request = new AbortController();
   const complete = vi.fn();
@@ -82,6 +91,7 @@ function mount(
       complete,
       ...(focus === undefined ? {} : { focus }),
       ...(mark === undefined ? {} : { mark }),
+      ...(arrived ? { arrived } : {}),
       ...(prepare ? { prepare } : {}),
       ...(hold ? { hold } : {}),
     });
@@ -202,6 +212,55 @@ it("marks a reveal beside the reader that owns focus, without taking it", async 
   expect(complete).toHaveBeenCalledOnce();
   expect(highlighted(row)).toBe(true);
   expect(document.activeElement).toBe(outside);
+});
+
+it("reports the arrival once to a reader whose focus is elsewhere", async () => {
+  const arrived = vi.fn();
+  const { row, outside, restart } = mount(undefined, {
+    focus: false,
+    mark: true,
+    arrived,
+  });
+  outside.focus();
+  await idle();
+  restart();
+  await idle();
+  expect(arrived).toHaveBeenCalledOnce();
+  expect(arrived).toHaveBeenCalledWith(row.closest("[data-message-id]"));
+  expect(document.activeElement).toBe(outside);
+});
+
+it("does not report an arrival behind a covering panel", async () => {
+  const arrived = vi.fn();
+  mount(undefined, { focus: false, arrived });
+  await idle();
+  expect(arrived).not.toHaveBeenCalled();
+});
+
+it("reads an arrival's text out through a status region", () => {
+  function Surface() {
+    const [announce, region] = useArrivalAnnouncement();
+    const row = useRef<HTMLDivElement>(null);
+    return (
+      <>
+        <div ref={row} data-message-id="target">
+          {"  Ada  "}
+          <span>said hello</span>
+        </div>
+        <button
+          type="button"
+          onClick={() => row.current && announce(row.current)}
+        >
+          Arrive
+        </button>
+        {region}
+      </>
+    );
+  }
+  render(<Surface />);
+  expect(screen.getByRole("status").textContent).toBe("");
+  act(() => screen.getByRole("button", { name: "Arrive" }).click());
+  expect(screen.getByRole("status").textContent).toBe("Ada said hello");
 });
 
 it("marks a reveal beside the reader only once its row is uncovered", async () => {

@@ -15,6 +15,7 @@ export function useMessageReveal({
   hold,
   focus = true,
   mark = focus,
+  arrived,
 }: {
   scroller: RefObject<HTMLElement | null>;
   settled: RefObject<boolean>;
@@ -36,6 +37,8 @@ export function useMessageReveal({
    * it out of view. The owner ends the hold on reader intent.
    */
   hold?: () => boolean;
+  /** Called once with the revealed row, as the reader sees it arrive. */
+  arrived?: ((row: HTMLElement) => void) | undefined;
 }) {
   const revealed = useRef<AbortSignal | undefined>(undefined);
   const focused = useRef<{ signal: AbortSignal; row: HTMLElement } | undefined>(
@@ -140,6 +143,7 @@ export function useMessageReveal({
         highlight.current();
         // A reveal behind a covering panel is not an arrival the reader sees.
         if (mark) highlight.current = highlightWhenSettled(container, target);
+        if (mark) arrived?.(row);
         readingPositioned(container);
         complete();
       });
@@ -178,6 +182,7 @@ export function useMessageReveal({
     focus,
     mark,
     hold,
+    arrived,
   ]);
   return revealed;
 }

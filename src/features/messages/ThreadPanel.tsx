@@ -61,6 +61,7 @@ import type { CSSProperties } from "react";
 import styles from "./Messages.module.css";
 import { Reading, readingPositioned } from "./use-reading";
 import { useMessageReveal } from "./use-message-reveal";
+import { useArrivalAnnouncement } from "./ArrivalAnnouncement";
 import { usePendingRequest } from "./use-pending-request";
 import type { PageNavigation } from "../navigation/service";
 import { messageViewKey } from "./view-key";
@@ -1145,12 +1146,16 @@ function ThreadMessages({
       : undefined;
   // A composer-focused opening focuses the reply box; a thread without one
   // (preview access, Solo, an unavailable root) keeps the reveal's focus.
+  // When the reply box takes focus, the message is read out instead.
   const replyFocused = navigation?.focus === "composer" && !!composerRoot;
+  const replyTakesFocus = replyFocused && revealSignal === navigation?.signal;
+  const [announceArrival, arrivalAnnouncement] = useArrivalAnnouncement();
   const revealed = useMessageReveal({
     scroller,
+    arrived: replyTakesFocus ? announceArrival : undefined,
     focus:
       revealFocus !== false &&
-      !(replyFocused && revealSignal === navigation?.signal) &&
+      !replyTakesFocus &&
       !(
         navigation?.target.kind === "conversation" &&
         navigation.target.panel === "members"
@@ -2419,6 +2424,7 @@ function ThreadMessages({
           }}
         />
       )}
+      {arrivalAnnouncement}
     </MessageEditScope>
   );
 }

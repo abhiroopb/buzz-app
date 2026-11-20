@@ -449,6 +449,10 @@ for (const kind of ["mention", "thread reply"]) {
         exact: true,
       }),
     ).toBeFocused();
+    // Focus no longer reads the message, so a status region does.
+    await expect(
+      page.getByRole("status").filter({ hasText: `Selected ${kind}` }),
+    ).toBeAttached();
     await expect(row.locator("strong").filter({ hasText: kind })).toHaveText(
       kind,
     );

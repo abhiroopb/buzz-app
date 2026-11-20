@@ -61,6 +61,7 @@ import {
   useReading,
 } from "./use-reading";
 import { useMessageReveal } from "./use-message-reveal";
+import { useArrivalAnnouncement } from "./ArrivalAnnouncement";
 import type { PageNavigation } from "../navigation/service";
 import { messageViewKey } from "./view-key";
 import { useKnownAgentPubkeys } from "../agents/use-known";
@@ -1194,19 +1195,19 @@ function Timeline({
     navigation?.target.kind === "conversation" &&
     navigation.target.panel === "members"
   );
+  // A composer-focused opening leaves its own reveal's focus to the composer,
+  // when the conversation has one to take it, and reads the message out instead.
+  const composerTakesFocus =
+    navigation?.focus === "composer" &&
+    targetSignal === navigation.signal &&
+    !composerless;
+  const [announceArrival, arrivalAnnouncement] = useArrivalAnnouncement();
   useMessageReveal({
     scroller,
     focus:
-      focusesTarget &&
-      inlineTarget?.focus !== false &&
-      // A composer-focused opening leaves its own reveal's focus to the
-      // composer, when the conversation has one to take it.
-      !(
-        navigation?.focus === "composer" &&
-        targetSignal === navigation.signal &&
-        !composerless
-      ),
+      focusesTarget && inlineTarget?.focus !== false && !composerTakesFocus,
     mark: focusesTarget,
+    arrived: composerTakesFocus ? announceArrival : undefined,
     settled,
     messageId: targetId,
     signal: targetSignal,
@@ -2387,6 +2388,7 @@ function Timeline({
         />
         <div className={styles.timelineEnd} aria-hidden="true" />
       </div>
+      {arrivalAnnouncement}
     </section>
   );
   return <MessageContextMenus>{feed}</MessageContextMenus>;
