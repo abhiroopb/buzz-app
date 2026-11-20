@@ -3431,8 +3431,12 @@ html[data-keyboard-navigation] .rawDiff:focus-visible {
 .activityExpansionRoot {
   display: contents;
 }
+/* One column as wide as the timeline: an implicit auto column would grow to a
+   row's unwrapped content, such as a relayed line's whole preview, and push
+   the row past the conversation's edge. */
 .activityExpansion {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   grid-template-rows: minmax(var(--activity-reveal-min, 0px), 1fr);
 }
 .activityExpansionContent {
