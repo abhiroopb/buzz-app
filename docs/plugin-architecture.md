@@ -1176,14 +1176,19 @@ gateway, in place of the gateway access check's `harnesses`, with
 Call it while the plugin starts. Buzz calls `source(signal)` once, as soon as
 the plugin registers it, and expects at most 32 harness names (lowercase
 letters, digits and hyphens), the names agent types declare. The list applies
-to every gateway membership for the launch. Access checks wait for it, but
-never more than five seconds (`SOURCE_MS`) from when the agents service
-started, so a turn's own wait for its first access check covers it. An empty list, a
+to every gateway membership for the launch. Access checks wait for the call
+only until bundled plugins have started (installed plugins don't hold them
+back), and never more than five seconds (`SOURCE_MS`) from when the agents
+service started. Once called, they wait for its answer, again at most five
+seconds, timed from the call, so a plugin that registers late still gets the
+whole answer budget. Neither timer lengthens a turn's own wait: a turn still
+waits at most 5 seconds for both the list and its access check, and a harness
+the list leaves out stops waiting as soon as the list is known. An empty list, a
 late answer, a throw or anything but such a list enables no harness: then
 Buzz sends the gateway nothing, not even the access check, and every agent
 keeps its own configuration with no notice. Otherwise the access check still
 decides whether a route is eligible, including 401/403 refusals. With no plugin calling it once every
-plugin has started, the access check's list stands. Only the first plugin to
+bundled plugin has started, the access check's list stands. Only the first plugin to
 call it in a launch is asked; later calls only log. A conversation whose
 saved session ran through the gateway still compacts through it when a
 non-empty list leaves its harness out, while its route is eligible; an

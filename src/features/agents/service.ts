@@ -1631,12 +1631,13 @@ export type Agents = {
    * `harnesses` (docs/configuration.md#agent-gateway). Call it while the
    * plugin starts: `source` is asked once, at once, and its answer, a list
    * of at most 32 harness names, applies to every membership. Access checks
-   * wait for it, at most `SOURCE_MS` from the app's start; no answer in
-   * time, a failure or anything but such a list enables none, and then
-   * nothing is sent to the gateway. `signal` aborts when the wait
-   * ends. Only the first plugin to call it in a launch is asked; later calls
-   * are ignored. With no plugin calling it once plugins have started, the
-   * access check's list stands. */
+   * wait for the call until bundled plugins have started, at most
+   * `SOURCE_MS` from the app's start, then for its answer, at most
+   * `SOURCE_MS` from the call; no answer in time, a failure or anything but
+   * such a list enables none, and then nothing is sent to the gateway.
+   * `signal` aborts when the wait ends. Only the first plugin to call it in
+   * a launch is asked; later calls are ignored. With no plugin calling it
+   * once bundled plugins have started, the access check's list stands. */
   gatewayHarnesses(source: GatewayHarnessSource): void;
   // Bundled plugins only, like `recommend`: the building blocks for a plugin
   // that moves agents onto Automatic (plugin-architecture.md).
@@ -3522,63 +3523,76 @@ export class AgentsService extends Service implements Agents {
     this.harnessCalled();
   }
   /** This launch's harness list from the plugin that calls
-   * `gatewayHarnesses`: undefined when plugins started (or `SOURCE_MS`
-   * passed) with none calling, none when its answer fails or is late. */
+   * `gatewayHarnesses`: undefined when bundled plugins started (or
+   * `SOURCE_MS` passed) with none calling, none when its answer fails or
+   * comes more than `SOURCE_MS` after the call. */
   private async selectedHarnesses(): Promise<readonly string[] | undefined> {
     const status = this.ctx.pluginStatus as Context["pluginStatus"] | undefined;
-    // One deadline from start-up for the call and its answer, as for
-    // `recommend`, so a turn's own readiness wait covers both.
+    // Only a bundled plugin can call, so installed plugins still starting
+    // never hold the access checks back.
+    const started = () =>
+      status?.bundledSettled
+        ? status.bundledSettled()
+        : (status?.settled?.() ?? true);
+    // The wait for a call is capped from start-up; its answer gets its own
+    // `SOURCE_MS` from the call, so a slow start-up never cuts it short.
+    const disposed = new AbortController();
+    this.ctx.effect(() => () => disposed.abort());
+    const calling = new AbortController();
+    const deadline = setTimeout(() => calling.abort(), SOURCE_MS);
+    const call = () => calling.abort();
+    disposed.signal.addEventListener("abort", call);
+    const given = await new Promise<typeof this.harnessSource>((resolve) => {
+      let stop = () => {};
+      const check = () => {
+        if (!this.harnessSource && !calling.signal.aborted && !started())
+          return;
+        stop();
+        calling.signal.removeEventListener("abort", check);
+        this.harnessCalled = () => {};
+        this.harnessClosed = true;
+        resolve(this.harnessSource);
+      };
+      this.harnessCalled = check;
+      calling.signal.addEventListener("abort", check);
+      stop = status?.subscribe(check) ?? stop;
+      check();
+    });
+    clearTimeout(deadline);
+    disposed.signal.removeEventListener("abort", call);
+    if (!given) return undefined;
     const ended = new AbortController();
     const timer = setTimeout(() => ended.abort(), SOURCE_MS);
-    this.ctx.effect(() => () => ended.abort());
+    const end = () => ended.abort();
+    // Disposed while waiting for the call: the answer's wait is over too.
+    if (disposed.signal.aborted) end();
+    disposed.signal.addEventListener("abort", end);
     try {
-      const given = await new Promise<typeof this.harnessSource>((resolve) => {
-        let stop = () => {};
-        const check = () => {
-          if (
-            !this.harnessSource &&
-            !ended.signal.aborted &&
-            !(status?.settled?.() ?? true)
-          )
-            return;
-          stop();
-          ended.signal.removeEventListener("abort", check);
-          this.harnessCalled = () => {};
-          this.harnessClosed = true;
-          resolve(this.harnessSource);
-        };
-        this.harnessCalled = check;
-        ended.signal.addEventListener("abort", check);
-        stop = status?.subscribe(check) ?? stop;
-        check();
-      });
-      if (!given) return undefined;
-      try {
-        const answer: unknown = await Promise.race([
-          (async () => given.source(ended.signal))(),
-          new Promise((_, reject) => {
-            const late = () => reject(new Error("it came too late"));
-            if (ended.signal.aborted) late();
-            ended.signal.addEventListener("abort", late);
-          }),
-        ]);
-        const names = Array.isArray(answer) ? Array.from(answer) : undefined;
-        if (
-          !names ||
-          names.length > 32 ||
-          !names.every((name) => typeof name === "string" && HARNESS.test(name))
-        )
-          throw new Error("it is not a list of harness names");
-        return Object.freeze([...new Set<string>(names)]);
-      } catch (error) {
-        console.warn(
-          `Plugin ${given.plugin}'s gateway harnesses were not used, so none are enabled`,
-          error instanceof Error ? error.message : error,
-        );
-        return Object.freeze([]);
-      }
+      const answer: unknown = await Promise.race([
+        (async () => given.source(ended.signal))(),
+        new Promise((_, reject) => {
+          const late = () => reject(new Error("it came too late"));
+          if (ended.signal.aborted) late();
+          ended.signal.addEventListener("abort", late);
+        }),
+      ]);
+      const names = Array.isArray(answer) ? Array.from(answer) : undefined;
+      if (
+        !names ||
+        names.length > 32 ||
+        !names.every((name) => typeof name === "string" && HARNESS.test(name))
+      )
+        throw new Error("it is not a list of harness names");
+      return Object.freeze([...new Set<string>(names)]);
+    } catch (error) {
+      console.warn(
+        `Plugin ${given.plugin}'s gateway harnesses were not used, so none are enabled`,
+        error instanceof Error ? error.message : error,
+      );
+      return Object.freeze([]);
     } finally {
       clearTimeout(timer);
+      disposed.signal.removeEventListener("abort", end);
       ended.abort();
     }
   }

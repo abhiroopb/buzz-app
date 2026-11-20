@@ -213,6 +213,24 @@ export class GatewayRoutes {
     return Array.isArray(selection) && !selection.includes(harness);
   }
 
+  /** Whether this launch's plugin selection (`selectHarnesses`) is still
+   * unknown, so a harness's place in it isn't known yet either. */
+  get selecting() {
+    return this.selection instanceof Promise;
+  }
+
+  /** Resolves once this launch's plugin selection is known, or `wait`
+   * aborts: for a turn that learns whether the selection leaves its harness
+   * out (`excludes`) before it waits on, or rechecks, an access check. */
+  async selectionForTurn(wait: AbortSignal) {
+    const selection = this.selection;
+    if (selection instanceof Promise)
+      await settledOrAborted(
+        selection.then(() => {}),
+        wait,
+      );
+  }
+
   /** Has `selection` decide which harnesses every route this launch
    * enables, in place of the access check's `harnesses`, once it settles:
    * undefined keeps the check's list, and a rejection enables none. Each
@@ -471,7 +489,8 @@ export class GatewayRoutes {
       selected: readonly string[] | undefined,
     ) => {
       if (this.readiness.get(decided.cache) !== probing) return;
-      // Nothing enabled, so nothing was checked: the route is external now.
+      // Nothing enabled, or no request bound, so nothing was checked: the
+      // route is external now, or pending until a request is bound.
       if (!answer) {
         this.readiness.delete(decided.cache);
         this.bump(key);
@@ -499,7 +518,8 @@ export class GatewayRoutes {
       );
       this.notify(key);
     };
-    const check = () => probeAccess(request, decided.url, headers.value);
+    const check = (request: GatewayRequest) =>
+      probeAccess(request, decided.url, headers.value);
     const selection = this.selection;
     // The check waits for the selection, and isn't sent if it enables none.
     // Once the selection is known, the check settles the route by itself.
@@ -509,12 +529,18 @@ export class GatewayRoutes {
             // Superseded while it waited (a membership change, a refusal):
             // the newer check goes out instead.
             if (this.readiness.get(decided.cache) !== probing) return;
+            // Through the request bound now, never one unbound meanwhile.
+            // With none bound, the entry is released, so the next
+            // `bindRequest` checks again.
+            const current = this.request;
             settle(
-              selected && !selected.length ? undefined : await check(),
+              current && (!selected || selected.length)
+                ? await check(current)
+                : undefined,
               selected,
             );
           })
-        : check().then((answer) => settle(answer, selection));
+        : check(request).then((answer) => settle(answer, selection));
     const probing: Readiness = Object.freeze({ status: "probing", settled });
     this.readiness.set(decided.cache, probing);
     return settled;

@@ -3798,6 +3798,104 @@ it("gives the first bundled plugin's harness list to gateway routes, and keeps t
   }
 });
 
+/** A promise and its resolver, for a test to settle when it chooses. */
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
+it("waits for a gateway harness list only through bundled start-up, and gives a late call's answer its own time", async () => {
+  const select = vi.spyOn(gatewayRoutes, "selectHarnesses");
+  const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  const start = () => {
+    const ctx = new Context();
+    let bundled = false;
+    const listeners = new Set<() => void>();
+    ctx.provide("pluginStatus", {
+      isActive: () => true,
+      subscribe: (listener: () => void) => {
+        listeners.add(listener);
+        return () => listeners.delete(listener);
+      },
+      // An installed plugin never finishes starting.
+      settled: () => false,
+      bundledSettled: () => bundled,
+    });
+    const client = fakeCommunities(fakeRelay());
+    new AgentsService(ctx, client.communities, fakeNative(), memoryStorage());
+    const selection = select.mock.lastCall?.[0];
+    if (!selection) throw new Error("No harness selection");
+    const owner = ctx.extend({
+      pluginOwner: bundledOwner(
+        Object.freeze({ id: "org.example", revision: "bundled" }),
+      ),
+    });
+    const settleBundled = () => {
+      bundled = true;
+      for (const listener of listeners) listener();
+    };
+    return { ctx, owner, settleBundled, selection };
+  };
+  try {
+    // Bundled plugins started with none calling: the access check's list
+    // stands at once, whatever installed plugins are doing.
+    const quick = start();
+    let known = false;
+    void quick.selection.then(() => {
+      known = true;
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(known).toBe(false);
+    quick.settleBundled();
+    await expect(quick.selection).resolves.toBeUndefined();
+
+    // A call late in start-up still gets `SOURCE_MS` for its answer.
+    const late = start();
+    await vi.advanceTimersByTimeAsync(SOURCE_MS - 1_000);
+    const answer = deferred<string[]>();
+    let signal!: AbortSignal;
+    late.owner.agents.gatewayHarnesses((given) => {
+      signal = given;
+      return answer.promise;
+    });
+    await vi.advanceTimersByTimeAsync(SOURCE_MS - 1);
+    expect(signal.aborted).toBe(false);
+    answer.resolve(["pi"]);
+    await expect(late.selection).resolves.toEqual(["pi"]);
+    expect(signal.aborted).toBe(true);
+
+    // But no more than that.
+    const slow = start();
+    let slowSignal!: AbortSignal;
+    slow.owner.agents.gatewayHarnesses((given) => {
+      slowSignal = given;
+      return new Promise(() => {});
+    });
+    await vi.advanceTimersByTimeAsync(SOURCE_MS);
+    await expect(slow.selection).resolves.toEqual([]);
+    expect(slowSignal.aborted).toBe(true);
+
+    // Stopped while its answer is pending: the wait is over at once.
+    const stopped = start();
+    let stoppedSignal!: AbortSignal;
+    stopped.owner.agents.gatewayHarnesses((given) => {
+      stoppedSignal = given;
+      return new Promise(() => {});
+    });
+    void stopped.ctx.fiber.dispose();
+    await expect(stopped.selection).resolves.toEqual([]);
+    expect(stoppedSignal.aborted).toBe(true);
+  } finally {
+    vi.useRealTimers();
+    select.mockRestore();
+    warn.mockRestore();
+  }
+});
+
 describe("an agent on Automatic and the recommended harness", () => {
   // A synthetic recommendation: codex first, then goose.
   const recommendation = {
@@ -23118,8 +23216,13 @@ describe("agent gateway gate", () => {
     });
   });
 
-  /** Live routes for `bot`, probing through a request the test answers. */
-  function liveRoutes() {
+  /** Live routes for `bot`, probing through a request the test answers.
+   * `prepare` runs before the membership is fed, such as to give the routes
+   * a plugin's selection; `origin` is the membership's community. */
+  function liveRoutes(
+    prepare?: (routes: GatewayRoutes) => void,
+    origin = "wss://relay.example.test",
+  ) {
     const id = "22222222-2222-4222-8222-222222222222";
     const routes = new GatewayRoutes(() => ({
       version: 2,
@@ -23143,10 +23246,11 @@ describe("agent gateway gate", () => {
           ),
         ),
     );
+    prepare?.(routes);
     routes.bindRequest(request);
     routes.setMembership({
       key: bot as never,
-      origin: "wss://relay.example.test",
+      origin,
       owner: viewer,
       pubkey: bot,
       community: { id, session: {} },
@@ -23175,6 +23279,182 @@ describe("agent gateway gate", () => {
 
   const PENDING =
     "Buzz is still checking this agent's gateway access. Try again in a moment.";
+
+  /** `liveRoutes` with this launch's plugin selection pending until the
+   * test settles it, the runner reading the selection from these routes. */
+  function selectedRoutes(origin?: string) {
+    const selection = deferred<readonly string[] | undefined>();
+    const live = liveRoutes(
+      (routes) => routes.selectHarnesses(selection.promise),
+      origin,
+    );
+    const { routes } = live;
+    const spies = [
+      vi
+        .spyOn(gatewayRoutes, "selecting", "get")
+        .mockImplementation(() => routes.selecting),
+      vi
+        .spyOn(gatewayRoutes, "selectionForTurn")
+        .mockImplementation((wait) => routes.selectionForTurn(wait)),
+      vi
+        .spyOn(gatewayRoutes, "excludes")
+        .mockImplementation((harness) => routes.excludes(harness)),
+      vi
+        .spyOn(gatewayRoutes, "routeFor")
+        .mockImplementation((key) => routes.routeFor(key)),
+    ];
+    return {
+      ...live,
+      select: selection.resolve,
+      restore: () => {
+        for (const spy of spies) spy.mockRestore();
+      },
+    };
+  }
+  /** Lets pending promise callbacks run. */
+  const flushed = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+  it("waits for the plugin's list first, then runs a harness it leaves out at once, while its access check stalls", async () => {
+    const live = selectedRoutes();
+    try {
+      // No check goes out before the list is known.
+      expect(live.request).not.toHaveBeenCalled();
+      const f = await mentioned(true);
+      await flushed();
+      expect(f.run).not.toHaveBeenCalled();
+      live.select(["pi"]);
+      // The list leaves `relay` out: the turn runs without waiting for the
+      // check, which is still unanswered.
+      await vi.waitFor(() => expect(f.run).toHaveBeenCalledTimes(1));
+      expect(live.request).toHaveBeenCalledTimes(1);
+      expect(ready).not.toHaveBeenCalled();
+      const delivery = f.run.mock.calls[0]?.[0];
+      expect(delivery).not.toHaveProperty("gateway");
+      expect(delivery).not.toHaveProperty("gatewayFallback");
+      expect(f.activity.reader.work()[0]).not.toHaveProperty("notice");
+    } finally {
+      live.restore();
+    }
+  });
+
+  it("neither waits for nor rechecks an access check after a 403 for a harness the plugin's list leaves out", async () => {
+    const live = selectedRoutes();
+    try {
+      live.select(["pi"]);
+      await vi.waitFor(() => expect(live.request).toHaveBeenCalledTimes(1));
+      live.answer(403);
+      await vi.waitFor(() =>
+        expect(live.routes.routeFor(bot as never)).toMatchObject({
+          reason: "auth",
+        }),
+      );
+      const f = await mentioned(true);
+      await vi.waitFor(() => expect(f.run).toHaveBeenCalledTimes(1));
+      await flushed();
+      expect(live.request).toHaveBeenCalledTimes(1);
+      expect(ready).not.toHaveBeenCalled();
+      const delivery = f.run.mock.calls[0]?.[0];
+      expect(delivery).not.toHaveProperty("gateway");
+      expect(delivery).not.toHaveProperty("gatewayFallback");
+      expect(f.activity.reader.work()[0]).not.toHaveProperty("error");
+    } finally {
+      live.restore();
+    }
+  });
+
+  it("routes a harness the plugin's list names once the list and then its access check settle, within the turn's wait", async () => {
+    const live = selectedRoutes();
+    try {
+      const f = await mentioned(true);
+      await flushed();
+      live.select(["relay"]);
+      await vi.waitFor(() => expect(live.request).toHaveBeenCalledTimes(1));
+      await vi.waitFor(() => expect(ready).toHaveBeenCalledTimes(1));
+      expect(f.run).not.toHaveBeenCalled();
+      live.answer(200, "{}");
+      await vi.waitFor(() => expect(f.run).toHaveBeenCalledTimes(1));
+      expect(f.run.mock.calls[0]?.[0]?.gateway?.route).toMatchObject({
+        kind: "eligible",
+        harnesses: ["relay"],
+      });
+    } finally {
+      live.restore();
+    }
+  });
+
+  it("fails a turn whose plugin list is still unknown when the wait ends, without sending an access check", async () => {
+    const cap = capReached();
+    const live = selectedRoutes();
+    try {
+      const f = await mentioned(true);
+      await vi.waitFor(() =>
+        expect(f.activity.reader.work()[0]).toMatchObject({
+          state: "error",
+          error: PENDING,
+        }),
+      );
+      expect(f.run).not.toHaveBeenCalled();
+      expect(live.request).not.toHaveBeenCalled();
+    } finally {
+      live.restore();
+      cap.mockRestore();
+    }
+  });
+
+  it("doesn't hold an unlisted community's turn for the plugin's list", async () => {
+    const live = selectedRoutes("wss://unlisted.example.test");
+    try {
+      expect(live.routes.routeFor(bot as never).kind).toBe("external");
+      const f = await mentioned(true);
+      await vi.waitFor(() => expect(f.run).toHaveBeenCalledTimes(1));
+      expect(gatewayRoutes.selectionForTurn).not.toHaveBeenCalled();
+      expect(f.run.mock.calls[0]?.[0]).not.toHaveProperty("gateway");
+      expect(f.activity.reader.work()[0]).not.toHaveProperty("notice");
+    } finally {
+      live.restore();
+    }
+  });
+
+  it("runs an attribution-only turn quietly while the plugin's list is unknown, and keeps quiet once it enables none", async () => {
+    const timeout = vi.spyOn(AbortSignal, "timeout");
+    const live = selectedRoutes();
+    try {
+      const f = await mentioned("attribution");
+      await vi.waitFor(() => expect(f.run).toHaveBeenCalledTimes(1));
+      expect(timeout).not.toHaveBeenCalledWith(TURN_READINESS_WAIT_MS);
+      expect(ready).not.toHaveBeenCalled();
+      const first = f.run.mock.calls[0]?.[0];
+      expect(first).not.toHaveProperty("gateway");
+      expect(first).not.toHaveProperty("gatewayFallback");
+      expect(f.activity.reader.work()[0]).not.toHaveProperty("notice");
+      // The list, late, enables none: nothing went to the gateway.
+      live.select([]);
+      await vi.waitFor(() =>
+        expect(live.routes.routeFor(bot as never).kind).toBe("external"),
+      );
+      expect(live.request).not.toHaveBeenCalled();
+      f.emit({
+        events: [
+          event("attr-after-empty", {
+            pubkey: viewer,
+            tags: [
+              ["h", channel],
+              ["p", bot],
+            ],
+          }),
+        ],
+        channelId: channel,
+      });
+      await vi.waitFor(() => expect(f.run).toHaveBeenCalledTimes(2));
+      expect(f.run.mock.calls[1]?.[0]).not.toHaveProperty("gatewayFallback");
+      expect(f.activity.reader.work().some((work) => "notice" in work)).toBe(
+        false,
+      );
+    } finally {
+      live.restore();
+      timeout.mockRestore();
+    }
+  });
 
   it("fails a turn whose access check outlasts the wait, before any type code runs, so a late 403 finds nothing dispatched", async () => {
     const cap = capReached();

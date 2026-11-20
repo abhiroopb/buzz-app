@@ -7,6 +7,9 @@ declare module "@deepseek-ai/cordis" {
       /** Whether startup is over: the plugin settings are read, or need the
        * user, and no plugin is still starting. Without it, startup is over. */
       settled?(): boolean;
+      /** Like `settled`, for bundled plugins only: the plugin settings are
+       * read, or need the user, and no bundled plugin is still starting. */
+      bundledSettled?(): boolean;
     };
   }
 }
