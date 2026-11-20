@@ -34,6 +34,9 @@ export function sidebarScrollAnchor(
   }
   for (const event of ["wheel", "touchmove"])
     viewport.addEventListener(event, onInput, inputOptions);
+  // The browser can scroll a newly focused row before dispatching scroll.
+  // Explicit sidebar reveals already capture their new position directly.
+  viewport.addEventListener("focusin", onInput, inputOptions);
   // The conversation stepping shortcut can start outside the sidebar.
   window.addEventListener("keydown", onInput, {
     ...inputOptions,
@@ -95,8 +98,8 @@ export function sidebarScrollAnchor(
 
   function refresh(slideSettled = false) {
     const current = viewport.scrollTop;
-    // A browser can move the scrollport during the DOM commit. Only treat
-    // that move as drift if layout also changed and no input is in flight.
+    // A browser can move the scrollport during the DOM commit. Treat that
+    // move as drift only when layout changed and no input is in flight.
     const userInput = inputFrame || pointerDown;
     if (anchors.length && (current === scrollTop || !userInput)) {
       const top = viewport.getBoundingClientRect().top;

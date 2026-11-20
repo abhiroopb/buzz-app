@@ -194,6 +194,37 @@ test("late contributed rows retry the sidebar reveal without moving the owner", 
   expect(errors).toEqual([]);
 });
 
+test("a focus scroll survives a layout change before its scroll event", async ({
+  page,
+}) => {
+  await open(page);
+  await update(page, { mounted: true, anchored: true });
+  const sidebar = page.getByRole("navigation", { name: "Subscribed channels" });
+  const destination = sidebar.locator('[data-row="20"]');
+  await sidebar.evaluate(async (viewport) => {
+    const scrolled = new Promise((resolve) =>
+      viewport.addEventListener("scroll", resolve, { once: true }),
+    );
+    viewport.scrollTop = 160;
+    await scrolled;
+  });
+  await expect(destination).not.toBeInViewport();
+
+  await destination.evaluate((row) => {
+    const viewport = row.closest("nav");
+    const scrolled = new Promise((resolve) =>
+      viewport.addEventListener("scroll", resolve, { once: true }),
+    );
+    row.tabIndex = -1;
+    row.focus();
+    viewport.querySelector('[data-row="0"]').style.height = "72px";
+    return scrolled;
+  });
+
+  await expect(destination).toBeFocused();
+  await expect(destination).toBeInViewport({ ratio: 1 });
+});
+
 test("a delayed reveal that lands in place takes precedence over the old anchor", async ({
   page,
 }) => {
