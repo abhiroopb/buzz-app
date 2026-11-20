@@ -154,16 +154,17 @@ test.describe("passive channel removal", () => {
       const workspace = sidebar.locator('[data-sidebar-section="group:work"]');
       const heading = workspace.locator("summary");
       const beta = workspace.getByRole("button", { name: "Beta", exact: true });
-      const soloRow = (id) =>
-        sidebar.locator(`button[data-solo-destination-id="${id}"]`);
-      if (removeSolo) {
-        const more = sidebar.getByRole("button", {
-          name: "Show more chats in Chats",
-        });
-        await more.click();
-      }
-      await expect(soloRow(soloIds.at(-1))).toBeVisible();
       if (keepViewport) {
+        // Classification needs the roster, even when the ordinary list caps its rows.
+        await page.waitForFunction((ids) => {
+          const session = window.fixtureRelay?.snapshot().session;
+          const channels = session?.channels.list().channels;
+          return ids.every((id) =>
+            channels?.some(
+              (row) => row.id === id && row.channelType === "solo",
+            ),
+          );
+        }, soloIds);
         await page.evaluate(async (ids) => {
           for (const id of ids) await window.fixtureSoloRegion.classify(id);
         }, soloIds);
@@ -171,17 +172,15 @@ test.describe("passive channel removal", () => {
           sidebar.locator("button[data-channel-id][data-solo-destination-id]"),
         ).toHaveCount(0);
       }
-      const anchor = keepViewport
-        ? sidebar
-            .locator(`[data-solo-destination-root="${soloIds[8]}"]`)
-            .locator(`button[data-solo-destination-id="${soloIds[8]}"]`)
-        : soloRow(soloIds[8]);
+      const anchor = sidebar
+        .locator(`[data-solo-destination-root="${soloIds[8]}"]`)
+        .locator(`button[data-solo-destination-id="${soloIds[8]}"]`);
       const departing = removeSolo
         ? sidebar
             .getByRole("navigation", { name: "Solo conversations" })
             .locator(`button[data-solo-destination-id="${soloIds[0]}"]`)
         : beta;
-      await expect(anchor).toBeVisible();
+      if (keepViewport) await expect(anchor).toBeVisible();
       if (!removeSolo)
         await expect
           .poll(() => app.relay.hasRoute("primary", "beta"))

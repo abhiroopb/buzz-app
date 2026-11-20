@@ -4,6 +4,7 @@ import { useSidebarView } from "../../src/bundled/channels/useSidebarView";
 import { ChannelSidebarRow } from "../../src/bundled/channels/ChannelSidebarRow";
 import { SidebarSection } from "../../src/bundled/channels/SidebarSection";
 import { SidebarContributionSection } from "../../src/features/channel-navigation/SidebarContributionSection";
+import { SidebarList } from "../../src/features/channel-navigation/SidebarList";
 import { ChannelSidebarDnd } from "../../src/features/channel-navigation/ChannelSidebarDnd";
 import type { Navigation } from "../../src/features/navigation/controller";
 import type { OpenTarget } from "../../src/features/navigation/targets";
@@ -133,7 +134,7 @@ function Harness() {
   };
   if (state.relocated !== undefined)
     return (
-      <nav aria-label="Sidebar">
+      <SidebarList navigation={{ label: "Sidebar" }}>
         {["channels", "starred"].map((section) => (
           <SidebarSection
             key={section}
@@ -161,7 +162,7 @@ function Harness() {
             ))}
           </SidebarSection>
         ))}
-      </nav>
+      </SidebarList>
     );
   return state.mounted ? <Sidebar at={state.at} rows={state.rows} /> : null;
 }
