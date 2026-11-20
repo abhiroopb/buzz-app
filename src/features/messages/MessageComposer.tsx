@@ -596,11 +596,13 @@ function Composer({
   );
   const inputId = useId();
   const forwardDisclosureId = useId();
+  const threadDraftKey = threadRootId
+    ? sourceRootId
+      ? `draft:${channelId}:thread:${sourceRootId}:subthread:${threadRootId}`
+      : `draft:${channelId}:thread:${threadRootId}`
+    : undefined;
   const draftKey =
-    submission?.draftKey ??
-    (threadRootId
-      ? `draft:${channelId}:thread:${threadRootId}`
-      : `draft:${channelId}`);
+    submission?.draftKey ?? threadDraftKey ?? `draft:${channelId}`;
   const [admitting, setAdmitting] = useState(false);
   const admission = useRef(false);
   const live = useRef(true);

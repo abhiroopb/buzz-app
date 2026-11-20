@@ -430,7 +430,9 @@ it("opens a verified thread draft with the real reply composer and origin action
 it("reopens a saved task draft, edits it, and sends in the task branch", async () => {
   const h = fixture();
   const task = h.seedSent(true, "room", "Start task");
-  const key = `draft:room:thread:${task.id}`;
+  const key = `draft:room:thread:${h.root.id}:subthread:${task.id}`;
+  const ordinaryKey = `draft:room:thread:${h.root.id}`;
+  writeView(h.session.scope, ordinaryKey, "Ordinary source draft");
   const taskView = render(
     <ThreadPanel
       session={h.session}
@@ -464,6 +466,16 @@ it("reopens a saved task draft, edits it, and sends in the task branch", async (
     "textbox",
   )) as ComposerInputElement;
   await waitFor(() => expect(editor).toHaveTextContent("Saved task draft"));
+  fireEvent.click(
+    within(region).getByRole("button", { name: "Open conversation" }),
+  );
+  expect(h.open).toHaveBeenCalledWith(
+    expect.objectContaining({
+      channelId: "room",
+      threadRootId: h.root.id,
+      messageId: task.id,
+    }),
+  );
   act(() => {
     editor.value = "Edited task draft";
     fireEvent.input(editor);
@@ -480,6 +492,9 @@ it("reopens a saved task draft, edits it, and sends in the task branch", async (
   expect(sent?.tags).toContainEqual(["e", h.root.id, "", "root"]);
   expect(sent?.tags).toContainEqual(["e", task.id, "", "reply"]);
   expect(mentionDraft(readView(h.session.scope, key, "")).text).toBe("");
+  expect(mentionDraft(readView(h.session.scope, ordinaryKey, "")).text).toBe(
+    "Ordinary source draft",
+  );
 });
 
 it.each([false, true])(

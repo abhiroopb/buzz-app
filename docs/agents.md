@@ -110,12 +110,12 @@ invocations keep their previous placement. Older plugins without `route` keep
 the existing behavior.
 
 A page-owned `Workspace` can select `{ channelId, threadId: sourceRoot,
-subthreadId: invocationId }`. It shows and composes within that branch. The
-existing source reader still owns access, edits, deletions, paging, and limits.
+subthreadId: invocationId }`. It shows and composes within that branch. Drafts
+created in this workspace retain the explicit branch target when reopened.
+The existing source reader still owns access, edits, deletions, paging, and limits.
 Only verified available descendant chains appear. Paging can scan unrelated
 source replies; a history limit does not establish complete task history.
-The source conversation keeps its existing collapsed-branch default, manual
-expansion, and explicit-message reveal behavior.
+The source conversation uses ordinary thread rendering and navigation.
 
 ## Local lifecycle evidence
 

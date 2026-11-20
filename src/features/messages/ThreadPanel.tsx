@@ -540,7 +540,7 @@ function OwnedThreadPanel({
       active={active}
       revealSelected={revealSelected}
       revealFocus={revealFocus}
-      latestRequest={latestRequest}
+      latestRequest={subthreadId ? latestRequest : undefined}
       unreadRequest={unreadRequest}
       requireReadyRoot={requireReadyRoot}
       subthreadId={subthreadId}
@@ -2218,6 +2218,7 @@ function ThreadMessages({
       (snapshot.root?.id === messageId && snapshot.targetStatus === "ready"))
       ? snapshot.root
       : undefined;
+  const sourceRootId = subthreadId ? composerRoot?.threadRootId : undefined;
   const retryThread = () => {
     if (showOlderPageStatus) {
       if (scroller.current) captureOlderAnchor(scroller.current);
@@ -2516,11 +2517,10 @@ function ThreadMessages({
           channelName={channelName}
           placeholder={replyPlaceholder(composerRoot)}
           threadRootId={composerRoot.id}
-          sourceRootId={composerRoot.threadRootId}
+          sourceRootId={sourceRootId}
           threadSeed={threadSeed}
           replyParentId={
-            replyParent ??
-            (composerRoot.threadRootId ? composerRoot.id : undefined)
+            replyParent ?? (sourceRootId ? composerRoot.id : undefined)
           }
           disabled={
             disabled ||
