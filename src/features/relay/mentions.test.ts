@@ -23,6 +23,15 @@ const viewer = keypair(),
   honey = keypair(),
   namesake = keypair();
 const owners: ReturnType<typeof createRelaySession>[] = [];
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
 function setup(
   soloMode = false,
   withLive = false,
@@ -307,8 +316,8 @@ it("keeps a confirmed owner mention through session replacement and ignores olde
   await vi.waitFor(() =>
     expect(first.session.ownerMentions?.latest(source)?.eventId).toBe(explicit),
   );
-  const received = Promise.withResolvers<RelayEvent>();
-  const acknowledgement = Promise.withResolvers<void>();
+  const received = deferred<RelayEvent>();
+  const acknowledgement = deferred<void>();
   first.publish.mockImplementationOnce(async (event) => {
     received.resolve(event);
     await acknowledgement.promise;
