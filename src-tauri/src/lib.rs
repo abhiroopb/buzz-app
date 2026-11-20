@@ -1356,7 +1356,7 @@ pub fn run() {
             if window.label() == "main" && matches!(event, tauri::WindowEvent::Destroyed | tauri::WindowEvent::CloseRequested { .. }) { window.state::<pairing::Pairing>().cancel_all(); }
             if window.label() == "main" && matches!(event, tauri::WindowEvent::Destroyed) { window.state::<relay::Spools>().cancel_all(&window.state::<relay::Uploads>()); }
             // The plugin caches this window's geometry here, for its next file save.
-            if matches!(event, tauri::WindowEvent::CloseRequested { .. }) { window_state::save_scale(window); }
+            if matches!(event, tauri::WindowEvent::CloseRequested { .. }) { window_state::keep_scale(window); }
             #[cfg(target_os = "macos")]
             if window.label() == "main" {
                 if let tauri::WindowEvent::CloseRequested { api, .. } = event {
@@ -1381,9 +1381,7 @@ pub fn run() {
             }
             if matches!(event, tauri::RunEvent::Exit) {
                 // The window-state plugin has just saved; record the scale it measured at.
-                if let Some(window) = app.get_webview_window("main") {
-                    window_state::save_scale(&window.as_ref().window());
-                }
+                window_state::save_scale(app);
                 shut_down(app);
                 #[cfg(target_os = "macos")]
                 relaunch::on_exit(app);

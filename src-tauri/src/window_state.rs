@@ -52,8 +52,7 @@ pub(crate) fn onboarding_preserve_window<R: Runtime>(
         StateFlags::SIZE | StateFlags::POSITION | StateFlags::MAXIMIZED | StateFlags::FULLSCREEN,
     )
     .map_err(|e| e.to_string())?;
-    let window = window.as_ref().window();
-    save_scale(&window);
+    save_scale(app);
     let bytes = std::fs::read(dir.join(app.filename())).map_err(|e| e.to_string())?;
     preserve_intro_geometry(&target, &bytes)?;
     // The snapshot copies the plugin's file, so it takes the scale paired with it.
@@ -65,39 +64,58 @@ pub(crate) fn onboarding_preserve_window<R: Runtime>(
     Ok(())
 }
 
-/// Record the main window's scale beside the plugin's save of its geometry.
-/// Call wherever the plugin saves, while the window still exists.
-pub(crate) fn save_scale<R: Runtime>(window: &Window<R>) {
+/// The scale paired with the plugin's in-memory frame since the last close,
+/// for an Exit after the window is gone. Only file saves write it to disk.
+#[derive(Default)]
+struct KeptScale(std::sync::Mutex<Option<f64>>);
+
+/// On close the plugin updates only its in-memory frame, so keep the scale in memory too.
+pub(crate) fn keep_scale<R: Runtime>(window: &Window<R>) {
     if window.label() == "main" {
-        if let Err(error) = write_scale(window) {
-            eprintln!("Could not save Buzz window scale: {error}");
-        }
+        let app = window.app_handle();
+        app.manage(KeptScale::default());
+        let kept = app.state::<KeptScale>();
+        let mut kept = kept.0.lock().unwrap();
+        *kept = scale_to_save(current_scale(window), *kept);
     }
 }
 
-fn write_scale<R: Runtime>(window: &Window<R>) -> tauri::Result<()> {
-    let path = window.app_handle().path().app_config_dir()?.join(SCALE);
-    // The plugin's save condition: while maximized or minimized, it keeps the
-    // normal frame it cached earlier, so the scale recorded with it stays too.
-    let frame_kept = window.is_maximized()? || window.is_minimized()?;
-    record_scale(&path, window.label(), window.scale_factor()?, frame_kept)?;
-    Ok(())
+/// Record the scale beside a save of the plugin's file (Exit or onboarding).
+pub(crate) fn save_scale<R: Runtime>(app: &tauri::AppHandle<R>) {
+    let current = app
+        .get_webview_window("main")
+        .and_then(|window| current_scale(&window.as_ref().window()));
+    let kept = app
+        .try_state::<KeptScale>()
+        .and_then(|kept| *kept.0.lock().unwrap());
+    let Some(scale) = scale_to_save(current, kept) else {
+        return;
+    };
+    let result = app.path().app_config_dir().and_then(|dir| {
+        std::fs::create_dir_all(&dir)?;
+        let scale = HashMap::from([("main", SavedScale { scale })]);
+        std::fs::write(dir.join(SCALE), serde_json::to_vec(&scale)?)?;
+        Ok(())
+    });
+    if let Err(error) = result {
+        eprintln!("Could not save Buzz window scale: {error}");
+    }
 }
 
-fn record_scale(
-    path: &std::path::Path,
-    label: &str,
-    scale: f64,
-    frame_kept: bool,
-) -> std::io::Result<()> {
-    if frame_kept {
-        return Ok(());
+/// The window's scale, and whether the plugin keeps its cached normal frame
+/// instead of reading a new one (its save condition: maximized or minimized).
+fn current_scale<R: Runtime>(window: &Window<R>) -> Option<(f64, bool)> {
+    let kept = window.is_maximized().ok()? || window.is_minimized().ok()?;
+    Some((window.scale_factor().ok()?, kept))
+}
+
+/// A frame the plugin reads now takes the current scale; a kept frame keeps
+/// the scale it was paired with. With neither, nothing is recorded.
+fn scale_to_save(current: Option<(f64, bool)>, kept: Option<f64>) -> Option<f64> {
+    match current {
+        Some((scale, false)) => Some(scale),
+        _ => kept,
     }
-    if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir)?;
-    }
-    let scale = HashMap::from([(label, SavedScale { scale })]);
-    std::fs::write(path, serde_json::to_vec(&scale)?)
 }
 
 #[derive(Serialize, Deserialize)]
@@ -930,20 +948,51 @@ mod tests {
 
     #[test]
     fn scale_is_kept_while_the_plugin_keeps_its_cached_normal_frame() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join(super::SCALE);
-        let scale = || super::saved_scale(&std::fs::read(&path).unwrap(), "main");
-        super::record_scale(&path, "main", 2.0, false).unwrap();
+        // A normal frame is read at save time, with the current scale.
+        assert_eq!(
+            super::scale_to_save(Some((1.0, false)), Some(2.0)),
+            Some(1.0)
+        );
         // Maximized or minimized on a 1x screen: the plugin keeps the frame
         // captured at 2x, so the 2x scale stays paired with it.
-        super::record_scale(&path, "main", 1.0, true).unwrap();
-        assert_eq!(scale(), Some(2.0));
-        super::record_scale(&path, "main", 1.0, false).unwrap();
-        assert_eq!(scale(), Some(1.0));
-        // With no earlier scale, none is written, and restore works as before.
-        let fresh = dir.path().join("fresh.json");
-        super::record_scale(&fresh, "main", 1.0, true).unwrap();
-        assert!(!fresh.exists());
+        assert_eq!(
+            super::scale_to_save(Some((1.0, true)), Some(2.0)),
+            Some(2.0)
+        );
+        // With no window at Exit, the scale kept at close is used.
+        assert_eq!(super::scale_to_save(None, Some(2.0)), Some(2.0));
+        // With neither, nothing is written, and the file on disk stays.
+        assert_eq!(super::scale_to_save(Some((1.0, true)), None), None);
+        assert_eq!(super::scale_to_save(None, None), None);
+    }
+
+    #[test]
+    fn close_without_exit_leaves_the_scale_file_paired_with_the_plugin_file() {
+        let (dir, app) = fixture();
+        let path = dir.path().join(super::SCALE);
+        let disk = br#"{"main":{"scale":2.0}}"#;
+        std::fs::write(&path, disk).unwrap();
+        let window = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .unwrap()
+            .as_ref()
+            .window();
+        // Close only updates the plugin's cache. A crash or Force Quit before
+        // Exit leaves the old geometry on disk, so the old scale stays too.
+        super::keep_scale(&window);
+        assert_eq!(std::fs::read(&path).unwrap(), disk);
+        let kept = app.state::<super::KeptScale>();
+        assert_eq!(
+            *kept.0.lock().unwrap(),
+            Some(window.scale_factor().unwrap())
+        );
+        // Exit writes the plugin's file, and the scale beside it.
+        super::save_scale(app.handle());
+        let bytes = std::fs::read(&path).unwrap();
+        assert_eq!(
+            super::saved_scale(&bytes, "main"),
+            window.scale_factor().ok()
+        );
     }
 
     #[test]
