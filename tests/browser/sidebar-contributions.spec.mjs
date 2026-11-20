@@ -349,9 +349,16 @@ appTest.describe("sidebar refresh", () => {
       const viewport = page.getByRole("navigation", {
         name: "Subscribed channels",
       });
-      await expect(
-        viewport.locator(`[data-solo-destination-id="${soloChannels[15]}"]`),
-      ).toBeVisible();
+      const lastSoloRow = viewport.locator(
+        `[data-solo-destination-id="${soloChannels.at(-1)}"]`,
+      );
+      const showMore = viewport.getByRole("button", {
+        name: "Show more in Solo",
+      });
+      // The roster can be ready while the Solo section lists only its first rows.
+      await expect(lastSoloRow.or(showMore).first()).toBeVisible();
+      if (await showMore.isVisible()) await showMore.click();
+      await expect(lastSoloRow).toBeVisible();
       await page.evaluate(async (ids) => {
         for (const id of ids) await window.fixtureSoloRegion.classify(id);
       }, soloChannels);
