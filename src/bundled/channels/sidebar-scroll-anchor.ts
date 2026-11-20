@@ -78,7 +78,9 @@ export function sidebarScrollAnchor(
             hit.closest("[data-solo-destination-root]") ??
             hit.closest(rowSelector),
         )
-        .find((hit) => hit && viewport.contains(hit));
+        .find(
+          (hit) => hit && viewport.contains(hit) && !hit.closest("[inert]"),
+        );
       if (!row) {
         y += 8;
         continue;
@@ -91,7 +93,7 @@ export function sidebarScrollAnchor(
     }
   }
 
-  function refresh() {
+  function refresh(slideSettled = false) {
     const current = viewport.scrollTop;
     // A browser can move the scrollport during the DOM commit. Only treat
     // that move as drift if layout also changed and no input is in flight.
@@ -100,7 +102,8 @@ export function sidebarScrollAnchor(
       const top = viewport.getBoundingClientRect().top;
       const bottom = top + viewport.clientHeight;
       const positions = anchors.flatMap(({ row, offset }) => {
-        if (!viewport.contains(row)) return [];
+        // Motion can retain a removed row as an inert element during its exit.
+        if (!viewport.contains(row) || row.closest("[inert]")) return [];
         const rect = row.getBoundingClientRect();
         const rowTop = layoutTop(row, rect);
         return rect.height
@@ -118,15 +121,21 @@ export function sidebarScrollAnchor(
         capture();
         return;
       }
-      const shifts = positions.map(({ shift }) => shift);
       if (
         current === scrollTop &&
-        shifts.length === anchors.length &&
-        shifts.every((shift) => Math.abs(shift) < 0.5)
-      )
+        positions.length === anchors.length &&
+        positions.every(({ shift }) => Math.abs(shift) < 0.5)
+      ) {
+        // Painted rows can overlap during a slide and hide other candidates.
+        if (slideSettled) capture();
         return;
+      }
+      const nearby = positions.filter(({ outside }) => !outside);
+      const shifts = (nearby.length ? nearby : positions).map(
+        ({ shift }) => shift,
+      );
       // A single task can move past otherwise stationary neighbors. Use the
-      // middle shift when all three survive so it cannot pull the viewport.
+      // middle shift when three candidates remain so it cannot pull the viewport.
       // With two, prefer the row that moved less in the content.
       const browserShift = current - scrollTop;
       const shift =

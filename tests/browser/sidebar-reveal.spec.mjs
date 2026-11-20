@@ -254,7 +254,62 @@ test("a refresh does not follow the only sampled row when it leaves view", async
   await expect(nearby).toBeInViewport({ ratio: 1 });
 });
 
-test("a wheel scroll during a row slide stays put when the slide ends", async ({
+test("a refresh keeps the nearby row when two sampled rows move to the top", async ({
+  page,
+}) => {
+  await open(page);
+  await update(page, { mounted: true, anchored: true });
+  const sidebar = page.getByRole("navigation", { name: "Subscribed channels" });
+  const nearby = sidebar.locator('[data-row="6"]');
+  await expect(nearby).toBeAttached();
+  const before = await sidebar.evaluate((viewport) => {
+    viewport.scrollTop = 160;
+    return viewport.scrollTop;
+  });
+  await settle(page);
+
+  await page.evaluate(() => {
+    const rows = window.sidebar.rows(50);
+    const promoted = rows.splice(4, 2);
+    window.sidebar.update({ rows: [...promoted, ...rows] });
+  });
+  await expect(sidebar.locator("[data-row]").first()).toHaveText("Row 4");
+  await settle(page);
+  expect(await sidebar.evaluate((viewport) => viewport.scrollTop)).toBe(before);
+  await expect(nearby).toBeInViewport({ ratio: 1 });
+});
+
+test("a refresh anchors to a surviving Team row while removed rows fade", async ({
+  page,
+}) => {
+  await open(page);
+  await update(page, { mounted: true, anchored: true, animated: true });
+  const sidebar = page.getByRole("navigation", { name: "Subscribed channels" });
+  const survivor = sidebar.locator('[data-row="6"]');
+  await expect(survivor).toBeAttached();
+  await sidebar.evaluate((viewport) => {
+    viewport.scrollTop = 160;
+  });
+  await settle(page);
+  const offset = () =>
+    survivor.evaluate(
+      (row) =>
+        row.getBoundingClientRect().top -
+        row.closest("nav").getBoundingClientRect().top,
+    );
+  const before = await offset();
+
+  await page.evaluate(() => {
+    const rows = window.sidebar.rows(50);
+    rows.splice(4, 2, 60);
+    window.sidebar.update({ rows });
+  });
+  await expect(sidebar.locator('[data-row="4"]')).toHaveCount(0);
+  await expect(sidebar.locator('[data-row="5"]')).toHaveCount(0);
+  expect(await offset()).toBe(before);
+});
+
+test("a wheel scroll during a row slide stays put through the next reorder", async ({
   page,
 }) => {
   await open(page);
@@ -290,10 +345,10 @@ test("a wheel scroll during a row slide stays put when the slide ends", async ({
   await expect(moving).toHaveCount(6);
   await sidebar.hover();
   const preWheel = await sidebar.evaluate((viewport) => viewport.scrollTop);
-  await page.mouse.wheel(0, 16);
+  await page.mouse.wheel(0, 8);
   await expect
     .poll(() => sidebar.evaluate((viewport) => viewport.scrollTop))
-    .toBe(preWheel + 16);
+    .toBe(preWheel + 8);
   await settle(page);
   const afterWheel = await sidebar.evaluate((viewport) => {
     for (const row of viewport.querySelectorAll("[data-moving]")) {
@@ -302,6 +357,17 @@ test("a wheel scroll during a row slide stays put when the slide ends", async ({
     return viewport.scrollTop;
   });
   expect(initial).toBeGreaterThan(0);
+  await expect(moving).toHaveCount(0);
+  await settle(page);
+  expect(await sidebar.evaluate((viewport) => viewport.scrollTop)).toBe(
+    afterWheel,
+  );
+  await page.evaluate(() => {
+    const rows = window.sidebar.rows(50);
+    rows.splice(4, 6, 6, 4, 7, 9, 5, 8);
+    window.sidebar.update({ rows });
+  });
+  await expect(sidebar.locator("[data-row]").nth(6)).toHaveText("Row 7");
   await expect(moving).toHaveCount(0);
   await settle(page);
   expect(await sidebar.evaluate((viewport) => viewport.scrollTop)).toBe(

@@ -223,7 +223,14 @@ export function SidebarUnread({
       )
         schedulePosition();
       if (records.some(({ target }) => rows.contains(target))) {
-        anchor?.refresh();
+        anchor?.refresh(
+          records.some(
+            ({ attributeName, target }) =>
+              attributeName === "data-moving" &&
+              target instanceof Element &&
+              !target.hasAttribute("data-moving"),
+          ),
+        );
         schedule();
       }
     });
@@ -235,6 +242,7 @@ export function SidebarUnread({
       attributeFilter: [
         "open",
         "hidden",
+        "inert",
         "style",
         "class",
         "data-channel-unread",
