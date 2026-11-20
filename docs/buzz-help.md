@@ -610,6 +610,9 @@ Quitting Buzz also turns it off.
   **Move down** in its **…** menu. Escape cancels a drag.
   The arrow beside a workspace’s creation icon offers **New chat**, **New channel**
   and **New DM**. The last choice becomes that workspace’s icon and primary action.
+  If the workspace heading shows recent activity, find these commands in its
+  **Actions** menu. Hover over the activity or Tab to the heading controls to
+  reveal the menu button. On touch, the menu button is visible directly.
   Open **Workspace settings** from the heading’s **…** menu to change the name,
   emoji, folders, worktree, Canvas, or default agents. Use **New channel** from a
   workspace to start with its destination and agent defaults selected. You can
@@ -1145,7 +1148,8 @@ Quitting Buzz also turns it off.
   The floating **New options** button at the end of the sidebar list opens
   **New chat**, **New channel**, **New DM** and **New workspace**. **Cmd/Ctrl+N**
   opens this menu in Messages, including during Focus. The **Solo** heading's
-  **+** starts a chat, and each workspace heading has its own **New** button.
+  **+** starts a chat. A workspace heading offers creation commands from its
+  **New** button or **Actions** menu.
 - **Link boundaries**: a bare http(s) or buzz link ends at whitespace and at
   fullwidth, CJK or curly-quote punctuation such as `，`, `。`, `」` or `’`. In a
   host name, `。` works as a dot. Wrap it as `<url>` to keep them in it.
@@ -1656,6 +1660,27 @@ If an agent reports incompatible synced settings, choose the **Previous Versions
   why and stops. In a community that advertises no archive authority, Delete
   skips the archive. **Forget** drops an agent that can't reach its community
   from this device only; it may stay in that community's channels.
+- **Settings → Agent setup → Base instructions** shows what Buzz tells every
+  agent on this device before the agent's own instructions, one section per
+  topic. For Publishing, Progress, Etiquette, Agent Memory, Engineering
+  Discipline, Commit identity and Autonomy, choose **Default**, **Off**, or
+  **Custom** with your own text of up to 4 KiB, then **Save**. The other
+  sections are always on, or Buzz sets them for the conversation; **All
+  sections** shows the default text of each. A plugin that is on can declare
+  sections that it replaces in the chats it manages: its install review lists
+  them. Each section that such a plugin declared names the plugin.
+  When you choose Off or Custom for one of them, your own choice also applies
+  in those chats. A choice applies to all your
+  agents on this device, not on your other devices, and each agent gets it
+  from its next turn. After the first choice that is not Default, older Codex
+  conversations on this device start over once; older Codex conversations on
+  another computer keep their instructions until you start a new session.
+  Agents that run outside the app, in the standalone agent host, get a change
+  when that host next starts. Mesh agents do not get the base instructions.
+  When a later
+  Buzz version changes the default of a section you turned off or replaced,
+  your choice stays, and the section says **Default changed** until you choose
+  **Keep mine** or **Reset to default**.
 - **Settings → Agent setup → Harness defaults** is where supported agent types
   offer installation, sign-in, and default-model controls. Available controls
   depend on the type. Do not assume a provider is configured or signed in.
