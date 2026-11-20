@@ -191,6 +191,7 @@ it("withholds owner proof while an open channel's metadata awaits revalidation a
 
   h.live().receive([roster(relay, "c", [honey.pubkey], 1700000001)]);
   const lookup = channels.resolve?.(["c"]);
+  assert(lookup);
   const pendingLookup = () =>
     h.pending.findIndex((entry) =>
       entry.filters.some(
@@ -199,9 +200,9 @@ it("withholds owner proof while an open channel's metadata awaits revalidation a
       ),
     );
   await vi.waitFor(() => expect(pendingLookup()).not.toBe(-1));
-  h.pending
-    .splice(pendingLookup(), 1)[0]
-    .respond([metadata(relay, "c", "General", 1700000000, [["public"]])]);
+  const [request] = h.pending.splice(pendingLookup(), 1);
+  assert(request);
+  request.respond([metadata(relay, "c", "General", 1700000000, [["public"]])]);
   await lookup;
   expect(channels.get?.("c")?.viewerRole).toBeUndefined();
   expect(channels.get?.("c")?.visibility).toBe("public");
