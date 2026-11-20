@@ -66,18 +66,17 @@ const teamRowStores = new WeakMap<
 
 /** Which group holds each channel's Team row, and where that row shows it. */
 function createTeamRowGroups() {
-  const entries = new Map<string, { owners: object[]; slots: HTMLElement[] }>();
-  const snapshots = new Map<string, TeamRowGroup>();
+  const entries = new Map<
+    string,
+    { owners: object[]; slots: HTMLElement[]; snapshot?: TeamRowGroup }
+  >();
   const listeners = new Map<string, Set<() => void>>();
   const publish = (id: string) => {
     const entry = entries.get(id);
     if (entry && entry.owners.length + entry.slots.length)
       // The first group keeps the row; the newest mounted row shows it.
-      snapshots.set(id, { owner: entry.owners[0], slot: entry.slots.at(-1) });
-    else {
-      entries.delete(id);
-      snapshots.delete(id);
-    }
+      entry.snapshot = { owner: entry.owners[0], slot: entry.slots.at(-1) };
+    else entries.delete(id);
     for (const listener of [...(listeners.get(id) ?? [])]) listener();
   };
   const hold = <T,>(id: string, key: "owners" | "slots", item: T) => {
@@ -94,7 +93,7 @@ function createTeamRowGroups() {
     };
   };
   return {
-    get: (id: string) => snapshots.get(id),
+    get: (id: string) => entries.get(id)?.snapshot,
     subscribe(id: string, listener: () => void) {
       const set = listeners.get(id) ?? new Set();
       listeners.set(id, set.add(listener));
