@@ -134,6 +134,11 @@ export type Conversation = {
   registerTabs(component: ComponentType<PageTabsProps>): void;
   /** Provides `ui.Workspace` while the plugin runs; the first one wins. */
   registerWorkspace(component: ComponentType<ConversationWorkspaceProps>): void;
+  /** The optional `ui.Workspace` props this host renders; check one before
+   * passing it. */
+  readonly workspaceSlots: Readonly<{
+    headerActions: true;
+  }>;
   /** Solo chat icons; the sidebar shows the first one. */
   chatIcons: ContributionReader<ChatIcon>;
   /** Shows `component` as each Solo chat's sidebar icon while the providing
@@ -216,6 +221,9 @@ export class ConversationService extends Service implements Conversation {
   readonly chatIcons;
   private readonly chatIconEntries;
   readonly ui: Conversation["ui"];
+  readonly workspaceSlots: Conversation["workspaceSlots"] = Object.freeze({
+    headerActions: true,
+  });
   constructor(ctx: Context) {
     super(ctx, "conversation");
     const attachments = createContributions<AttachmentRenderer>(ctx);
