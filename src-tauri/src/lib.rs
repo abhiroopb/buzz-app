@@ -1355,8 +1355,12 @@ pub fn run() {
         .on_window_event(|window, event| {
             if window.label() == "main" && matches!(event, tauri::WindowEvent::Destroyed | tauri::WindowEvent::CloseRequested { .. }) { window.state::<pairing::Pairing>().cancel_all(); }
             if window.label() == "main" && matches!(event, tauri::WindowEvent::Destroyed) { window.state::<relay::Spools>().cancel_all(&window.state::<relay::Uploads>()); }
-            // The plugin caches this window's geometry here, for its next file save.
-            if matches!(event, tauri::WindowEvent::CloseRequested { .. }) { window_state::keep_scale(window); }
+            // The plugin updates its cached geometry here, for its next file save.
+            match event {
+                tauri::WindowEvent::Resized(_) => window_state::follow_scale(window, true),
+                tauri::WindowEvent::CloseRequested { .. } => window_state::follow_scale(window, false),
+                _ => {}
+            }
             #[cfg(target_os = "macos")]
             if window.label() == "main" {
                 if let tauri::WindowEvent::CloseRequested { api, .. } = event {
