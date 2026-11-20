@@ -50,8 +50,9 @@ export type EligibleRoute = Readonly<{
   identity: GatewayIdentity;
   /** The build's context header profile, for the adapter's composer. */
   profile: GatewayProfile;
-  /** The harnesses the gateway enables for this membership (its rollout
-   * flag); a harness not listed keeps its existing behavior. */
+  /** The harnesses enabled for this membership: a plugin's list for the
+   * launch (`selectHarnesses`), else the access check's rollout flag; a
+   * harness not listed keeps its existing behavior. */
   harnesses: readonly string[];
 }>;
 export type BlockedRoute = Readonly<{
@@ -161,6 +162,13 @@ export class GatewayRoutes {
   private readonly revisions = new Map<AgentKey, number>();
   private readonly listeners = new Map<AgentKey, Set<() => void>>();
   private request: GatewayRequest | undefined;
+  /** This launch's harness list from a plugin (`selectHarnesses`), in place
+   * of each access check's: a promise until it settles, then its list, or
+   * undefined to keep the check's. */
+  private selection:
+    | Promise<readonly string[] | undefined>
+    | readonly string[]
+    | undefined;
   private readonly descriptor: GatewayDescriptor | null | "invalid";
   private readonly profile: GatewayProfile | undefined;
 
@@ -194,6 +202,41 @@ export class GatewayRoutes {
     return Object.hasOwn(descriptor.upstreams, harness)
       ? descriptor.upstreams[harness as keyof typeof descriptor.upstreams]
       : undefined;
+  }
+
+  /** Whether this launch's plugin selection (`selectHarnesses`) leaves
+   * `harness` out: false while it's pending, when there is none, or when it
+   * keeps the access check's list. A turn for a harness it leaves out keeps
+   * its own configuration whatever the route, blocked included. */
+  excludes(harness: string) {
+    const selection = this.selection;
+    return Array.isArray(selection) && !selection.includes(harness);
+  }
+
+  /** Has `selection` decide which harnesses every route this launch
+   * enables, in place of the access check's `harnesses`, once it settles:
+   * undefined keeps the check's list, and a rejection enables none. Each
+   * access check waits for it, so a route stays pending until both are
+   * known, and none goes out once it enables none: every route is then
+   * external, so no harness sends the gateway anything. Otherwise the
+   * access check alone still decides whether a route is eligible. Set it
+   * before feeding memberships. */
+  selectHarnesses(selection: Promise<readonly string[] | undefined>) {
+    const settled = selection
+      .catch(() => Object.freeze([]))
+      .then((list) => {
+        if (this.selection !== settled) return list;
+        this.selection = list;
+        // Every route is external now, fed or not.
+        if (list && !list.length)
+          for (const key of new Set([
+            ...this.members.keys(),
+            ...this.listeners.keys(),
+          ]))
+            this.notify(key);
+        return list;
+      });
+    this.selection = settled;
   }
 
   /** Lets readiness probes go out through `request` until the returned
@@ -361,6 +404,9 @@ export class GatewayRoutes {
     const external = decided(Object.freeze({ kind: "external", revision }));
     const descriptor = this.descriptor;
     if (descriptor === null) return external;
+    // A plugin enabled no harness: nothing goes to the gateway.
+    if (Array.isArray(this.selection) && !this.selection.length)
+      return external;
     const profile = this.profile;
     if (descriptor === "invalid" || !profile)
       return decided(blocked("", "descriptor_invalid", revision));
@@ -369,7 +415,8 @@ export class GatewayRoutes {
       member &&
       descriptor.communities.find(({ origin }) => origin === member.origin);
     // Unknown here means not fed yet or removed: never external while a
-    // descriptor is configured, so a stale key can't reach direct providers.
+    // descriptor is configured (and a harness enabled), so a stale key
+    // can't reach direct providers.
     if (!member) return decided(blocked("", "readiness_pending", revision));
     if (!community) return external;
     const gateway = descriptor.gateway;
@@ -419,27 +466,55 @@ export class GatewayRoutes {
     });
     if (!headers.ok) return;
     const started = this.revision(key);
-    const settled = probeAccess(request, decided.url, headers.value).then(
-      (result) => {
-        if (this.readiness.get(decided.cache) !== probing) return;
-        if (this.revision(key) !== started) {
-          this.readiness.delete(decided.cache);
-          return;
-        }
+    const settle = (
+      answer: Awaited<ReturnType<typeof probeAccess>> | undefined,
+      selected: readonly string[] | undefined,
+    ) => {
+      if (this.readiness.get(decided.cache) !== probing) return;
+      // Nothing enabled, so nothing was checked: the route is external now.
+      if (!answer) {
+        this.readiness.delete(decided.cache);
         this.bump(key);
-        if (!("reason" in result)) this.authRefusals.delete(decided.cache);
-        else if (result.reason === "auth") this.authRefusals.add(decided.cache);
-        this.readiness.set(
-          decided.cache,
-          Object.freeze(
-            "reason" in result
-              ? { status: "failed", reason: result.reason }
-              : { status: "ready", answer: result },
-          ),
-        );
         this.notify(key);
-      },
-    );
+        return;
+      }
+      const result =
+        selected && !("reason" in answer)
+          ? Object.freeze({ harnesses: selected })
+          : answer;
+      if (this.revision(key) !== started) {
+        this.readiness.delete(decided.cache);
+        return;
+      }
+      this.bump(key);
+      if (!("reason" in result)) this.authRefusals.delete(decided.cache);
+      else if (result.reason === "auth") this.authRefusals.add(decided.cache);
+      this.readiness.set(
+        decided.cache,
+        Object.freeze(
+          "reason" in result
+            ? { status: "failed", reason: result.reason }
+            : { status: "ready", answer: result },
+        ),
+      );
+      this.notify(key);
+    };
+    const check = () => probeAccess(request, decided.url, headers.value);
+    const selection = this.selection;
+    // The check waits for the selection, and isn't sent if it enables none.
+    // Once the selection is known, the check settles the route by itself.
+    const settled =
+      selection instanceof Promise
+        ? selection.then(async (selected) => {
+            // Superseded while it waited (a membership change, a refusal):
+            // the newer check goes out instead.
+            if (this.readiness.get(decided.cache) !== probing) return;
+            settle(
+              selected && !selected.length ? undefined : await check(),
+              selected,
+            );
+          })
+        : check().then((answer) => settle(answer, selection));
     const probing: Readiness = Object.freeze({ status: "probing", settled });
     this.readiness.set(decided.cache, probing);
     return settled;

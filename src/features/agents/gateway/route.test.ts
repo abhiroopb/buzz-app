@@ -194,6 +194,168 @@ describe("GatewayRoutes", () => {
     expect(routes.routeFor(key("b1"))).toMatchObject(route);
   });
 
+  describe("a plugin's harness selection", () => {
+    /** A selection the test settles. */
+    function selection() {
+      let settle!: (list: readonly string[] | undefined) => void;
+      let fail!: (error: Error) => void;
+      const promise = new Promise<readonly string[] | undefined>(
+        (resolve, reject) => {
+          settle = resolve;
+          fail = reject;
+        },
+      );
+      return { promise, settle, fail };
+    }
+    const flush = async () => {
+      for (let i = 0; i < 5; i++) await Promise.resolve();
+    };
+
+    /** Routes whose selection is `chosen`, with a member fed and a request
+     * path bound. */
+    function selecting(chosen: Promise<readonly string[] | undefined>) {
+      const routes = new GatewayRoutes(() => DESCRIPTOR);
+      routes.selectHarnesses(chosen);
+      const net = gateway();
+      routes.bindRequest(net.request);
+      const heard = vi.fn();
+      routes.subscribeRoute(key("b1"), heard);
+      routes.setMembership(member("b1", {}));
+      return { routes, heard, ...net };
+    }
+
+    it("says which harnesses it leaves out once settled, and none before or without a list", async () => {
+      const routes = new GatewayRoutes(() => DESCRIPTOR);
+      expect(routes.excludes("goose")).toBe(false);
+      const chosen = selection();
+      routes.selectHarnesses(chosen.promise);
+      expect(routes.excludes("goose")).toBe(false);
+      chosen.settle(Object.freeze(["codex"]));
+      await flush();
+      expect(routes.excludes("codex")).toBe(false);
+      expect(routes.excludes("goose")).toBe(true);
+      const kept = new GatewayRoutes(() => DESCRIPTOR);
+      kept.selectHarnesses(Promise.resolve(undefined));
+      await flush();
+      expect(kept.excludes("goose")).toBe(false);
+      const failed = new GatewayRoutes(() => DESCRIPTOR);
+      failed.selectHarnesses(Promise.reject(new Error("no")));
+      await flush();
+      expect(failed.excludes("goose")).toBe(true);
+    });
+
+    it("waits for it before checking access, then uses its list in place of the check's", async () => {
+      const chosen = selection();
+      const { routes, request, answer } = selecting(chosen.promise);
+      await flush();
+      // Nothing goes to the gateway before the selection is known.
+      expect(request).not.toHaveBeenCalled();
+      expect(routes.routeFor(key("b1"))).toMatchObject({
+        kind: "blocked",
+        reason: "readiness_pending",
+      });
+      // A turn waits for it like any access check in flight.
+      const turn = routes.routeForTurn(key("b1"), new AbortController().signal);
+      chosen.settle(["codex", "goose"]);
+      await flush();
+      expect(request).toHaveBeenCalledTimes(1);
+      await answer('{"harnesses":["pi"]}');
+      await expect(turn).resolves.toMatchObject({
+        kind: "eligible",
+        harnesses: ["codex", "goose"],
+      });
+      // A later check uses the settled list without waiting again.
+      routes.invalidate(key("b1"));
+      await answer('{"harnesses":["pi"]}');
+      expect(routes.routeFor(key("b1"))).toMatchObject({
+        kind: "eligible",
+        harnesses: ["codex", "goose"],
+      });
+    });
+
+    it("keeps the access check's list when it settles with none", async () => {
+      const { routes, answer } = selecting(Promise.resolve(undefined));
+      await flush();
+      await answer('{"harnesses":["pi"]}');
+      expect(routes.routeFor(key("b1"))).toMatchObject({
+        kind: "eligible",
+        harnesses: ["pi"],
+      });
+    });
+
+    it.each([
+      ["enables none", () => Promise.resolve([] as readonly string[])],
+      ["fails", () => Promise.reject(new Error("unreadable"))],
+    ])(
+      "sends the gateway nothing when it %s: every route is external",
+      async (_, chosen) => {
+        const { routes, request, heard } = selecting(chosen());
+        await flush();
+        expect(request).not.toHaveBeenCalled();
+        expect(heard).toHaveBeenCalled();
+        expect(routes.routeFor(key("b1")).kind).toBe("external");
+        await expect(
+          routes.routeForTurn(key("b1"), new AbortController().signal),
+        ).resolves.toMatchObject({ kind: "external" });
+        // A later membership, or a refusal, changes nothing.
+        routes.setMembership(member("b2", {}));
+        routes.invalidate(key("b1"));
+        await flush();
+        expect(request).not.toHaveBeenCalled();
+        expect(routes.routeFor(key("b2")).kind).toBe("external");
+      },
+    );
+
+    it("sends only the newest check when the membership changes while it waits", async () => {
+      const chosen = selection();
+      const { routes, request, answer } = selecting(chosen.promise);
+      routes.invalidate(key("b1"));
+      routes.setMembership(member("b1", {}));
+      chosen.settle(["pi"]);
+      await flush();
+      expect(request).toHaveBeenCalledTimes(1);
+      await answer('{"harnesses":[]}');
+      expect(routes.routeFor(key("b1"))).toMatchObject({
+        kind: "eligible",
+        harnesses: ["pi"],
+      });
+    });
+
+    it("tells a key that was never fed when every route turns external", async () => {
+      const chosen = selection();
+      const routes = new GatewayRoutes(() => DESCRIPTOR);
+      routes.selectHarnesses(chosen.promise);
+      const heard = vi.fn();
+      routes.subscribeRoute(key("ghost"), heard);
+      expect(routes.routeFor(key("ghost")).kind).toBe("blocked");
+      chosen.settle([]);
+      await flush();
+      expect(heard).toHaveBeenCalled();
+      expect(routes.routeFor(key("ghost")).kind).toBe("external");
+    });
+
+    it("never overrides a refusal or a failed check", async () => {
+      const retry = retryClock();
+      for (const [status, reason] of [
+        [403, "auth"],
+        [500, "gateway_error"],
+      ] as const) {
+        const { routes, answer } = selecting(Promise.resolve(["pi"]));
+        await flush();
+        await answer("", status);
+        if (reason === "gateway_error") {
+          await retry();
+          await answer("", status);
+        }
+        await flush();
+        expect(routes.routeFor(key("b1"))).toMatchObject({
+          kind: "blocked",
+          reason,
+        });
+      }
+    });
+  });
+
   it("blocks on a network failure that persists through its retry, never external", async () => {
     const retry = retryClock();
     const { routes, pending, request } = setup();

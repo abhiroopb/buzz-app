@@ -182,8 +182,12 @@ With it set, a local agent membership in a listed community routes through the
 gateway only when the relay's NIP-11 `read_state_snapshot.community_id` is
 exactly the listed ID, the descriptor gives the agent type's declared harness
 an upstream, the gateway's access check succeeds, and the check's `harnesses`
-list names that harness. Any other field in the check's answer is the
-gateway's to enforce and is ignored. A type with no declared harness, no
+list names that harness. A bundled plugin can supply that list for the launch
+instead, with `ctx.agents.gatewayHarnesses(source)`; see
+[Plugin architecture](plugin-architecture.md). When that list is empty, or
+the plugin fails or answers late, no access check runs and every agent keeps
+its existing behavior, with nothing sent to the gateway. Any other field in the check's
+answer is the gateway's to enforce and is ignored. A type with no declared harness, no
 upstream, or a harness the gateway doesn't list keeps its existing behavior.
 While an access check is in flight, such as the first one at startup or the
 re-check after the gateway refuses a request, a turn waits for it for up to 5

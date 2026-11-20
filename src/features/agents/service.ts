@@ -85,6 +85,7 @@ import {
   recommendedCandidates,
   type RecommendedCandidate,
   type RecommendedPick,
+  SOURCE_MS,
   withRecommended,
 } from "./recommended";
 import {
@@ -276,6 +277,7 @@ import {
   type BlockedReason,
   type EligibleRoute,
   gatewayRoutes,
+  HARNESS,
   TURN_READINESS_WAIT_MS,
 } from "./gateway/route";
 
@@ -1534,6 +1536,9 @@ export type NewAgent = Readonly<{
 /** A plugin's recommended agent setup for this launch,
  * `{recommendedBy?, description?, candidates}`; see `Agents.recommend`. */
 export type RecommendedSource = (signal: AbortSignal) => unknown;
+/** A plugin's list of the harnesses this launch's agent gateway routes
+ * enable; see `Agents.gatewayHarnesses`. */
+export type GatewayHarnessSource = (signal: AbortSignal) => unknown;
 export type { PluginNote } from "./plugin-notes";
 /** An agent's own model settings, as `switchToAutomatic` found them. */
 export type ModelSettings = Readonly<{
@@ -1621,6 +1626,18 @@ export type Agents = {
    * answer, a failure, an invalid or late setup keeps the build's. `signal` aborts when the wait ends. Only the first
    * plugin to call it in a launch is asked; later calls are ignored. */
   recommend(source: RecommendedSource): void;
+  /** Bundled plugins only: decides which harnesses this launch's agent
+   * gateway routes enable, in place of the gateway access check's
+   * `harnesses` (docs/configuration.md#agent-gateway). Call it while the
+   * plugin starts: `source` is asked once, at once, and its answer, a list
+   * of at most 32 harness names, applies to every membership. Access checks
+   * wait for it, at most `SOURCE_MS` from the app's start; no answer in
+   * time, a failure or anything but such a list enables none, and then
+   * nothing is sent to the gateway. `signal` aborts when the wait
+   * ends. Only the first plugin to call it in a launch is asked; later calls
+   * are ignored. With no plugin calling it once plugins have started, the
+   * access check's list stands. */
+  gatewayHarnesses(source: GatewayHarnessSource): void;
   // Bundled plugins only, like `recommend`: the building blocks for a plugin
   // that moves agents onto Automatic (plugin-architecture.md).
   /** Whether plugin start-up is over (each plugin started, or failed), the
@@ -2518,6 +2535,9 @@ export class AgentsService extends Service implements Agents {
           if (!identity.deleted) this.followRecommendedHarness(identity);
       },
     );
+    // Routes wait for a plugin's harness list, or for start-up to end
+    // without one.
+    gatewayRoutes.selectHarnesses(this.selectedHarnesses());
     // So `ready` readers hear when start-up ends and the setup is final.
     const status = ctx.pluginStatus as Context["pluginStatus"] | undefined;
     if (status) {
@@ -3478,6 +3498,89 @@ export class AgentsService extends Service implements Agents {
     }
     this.recommendSource = { plugin, source };
     this.recommendCalled();
+  }
+  /** The plugin `gatewayHarnesses` asks this launch, once it has called. */
+  private harnessSource?: Readonly<{
+    plugin: string;
+    source: GatewayHarnessSource;
+  }>;
+  /** Whether this launch's harness list is decided, so a call is too late. */
+  private harnessClosed = false;
+  /** Tells the wait in `selectedHarnesses` a plugin called. */
+  private harnessCalled = () => {};
+  gatewayHarnesses(source: GatewayHarnessSource) {
+    const plugin = this.bundledCaller("gatewayHarnesses");
+    if (typeof source !== "function")
+      throw new Error("gatewayHarnesses needs a function");
+    if (this.harnessSource || this.harnessClosed) {
+      console.warn(
+        `Plugin ${plugin}'s gateway harnesses are ignored: ${this.harnessSource ? "another plugin gives this launch's" : "they came after start-up"}`,
+      );
+      return;
+    }
+    this.harnessSource = { plugin, source };
+    this.harnessCalled();
+  }
+  /** This launch's harness list from the plugin that calls
+   * `gatewayHarnesses`: undefined when plugins started (or `SOURCE_MS`
+   * passed) with none calling, none when its answer fails or is late. */
+  private async selectedHarnesses(): Promise<readonly string[] | undefined> {
+    const status = this.ctx.pluginStatus as Context["pluginStatus"] | undefined;
+    // One deadline from start-up for the call and its answer, as for
+    // `recommend`, so a turn's own readiness wait covers both.
+    const ended = new AbortController();
+    const timer = setTimeout(() => ended.abort(), SOURCE_MS);
+    this.ctx.effect(() => () => ended.abort());
+    try {
+      const given = await new Promise<typeof this.harnessSource>((resolve) => {
+        let stop = () => {};
+        const check = () => {
+          if (
+            !this.harnessSource &&
+            !ended.signal.aborted &&
+            !(status?.settled?.() ?? true)
+          )
+            return;
+          stop();
+          ended.signal.removeEventListener("abort", check);
+          this.harnessCalled = () => {};
+          this.harnessClosed = true;
+          resolve(this.harnessSource);
+        };
+        this.harnessCalled = check;
+        ended.signal.addEventListener("abort", check);
+        stop = status?.subscribe(check) ?? stop;
+        check();
+      });
+      if (!given) return undefined;
+      try {
+        const answer: unknown = await Promise.race([
+          (async () => given.source(ended.signal))(),
+          new Promise((_, reject) => {
+            const late = () => reject(new Error("it came too late"));
+            if (ended.signal.aborted) late();
+            ended.signal.addEventListener("abort", late);
+          }),
+        ]);
+        const names = Array.isArray(answer) ? Array.from(answer) : undefined;
+        if (
+          !names ||
+          names.length > 32 ||
+          !names.every((name) => typeof name === "string" && HARNESS.test(name))
+        )
+          throw new Error("it is not a list of harness names");
+        return Object.freeze([...new Set<string>(names)]);
+      } catch (error) {
+        console.warn(
+          `Plugin ${given.plugin}'s gateway harnesses were not used, so none are enabled`,
+          error instanceof Error ? error.message : error,
+        );
+        return Object.freeze([]);
+      }
+    } finally {
+      clearTimeout(timer);
+      ended.abort();
+    }
   }
   /** The calling plugin's id; throws unless it is bundled. */
   private bundledCaller(what: string) {

@@ -3046,7 +3046,9 @@ export class AgentRunners {
    * replayed. A turn whose access is revoked after dispatch is the harness's
    * to fail visibly. An `attribution` type's turn never waits or fails here:
    * it takes the route as it stands, and any blocked route, `auth` and
-   * `readiness_pending` included, runs it unattributed with a notice. */
+   * `readiness_pending` included, runs it unattributed with a notice. A
+   * harness a plugin's list leaves out (`GatewayRoutes.excludes`) runs with
+   * its own configuration, without a notice, whatever the route. */
   private async gatewayRouting(
     agent: Agent,
     type: RegisteredAgentType,
@@ -3071,6 +3073,9 @@ export class AgentRunners {
     );
     signal.throwIfAborted();
     if (route.kind === "external") return {};
+    // A harness the plugin's list leaves out keeps its own configuration even
+    // when the access check refused, so a partial list never fails its turns.
+    if (gatewayRoutes.excludes(harness)) return {};
     if (route.kind === "blocked") {
       if (attribution) {
         const notice = unattributedNotice(route.reason);

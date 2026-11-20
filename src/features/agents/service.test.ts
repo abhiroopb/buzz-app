@@ -154,6 +154,7 @@ import {
   recommendationReady,
   recommendedSetup,
   setRuntimeRecommendation,
+  SOURCE_MS,
 } from "./recommended";
 
 /** The tag that the echo type's default watch matches. */
@@ -3681,6 +3682,111 @@ it("asks the first plugin that recommends, and waits for plugins to start before
     expect(recommendedSetup().candidates).toEqual([]);
   } finally {
     setRuntimeRecommendation(undefined);
+    warn.mockRestore();
+  }
+});
+
+it("gives the first bundled plugin's harness list to gateway routes, and keeps the access check's when none calls", async () => {
+  const select = vi.spyOn(gatewayRoutes, "selectHarnesses");
+  const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+  const start = () => {
+    const ctx = new Context();
+    let settled = false;
+    const listeners = new Set<() => void>();
+    ctx.provide("pluginStatus", {
+      isActive: () => true,
+      subscribe: (listener: () => void) => {
+        listeners.add(listener);
+        return () => listeners.delete(listener);
+      },
+      settled: () => settled,
+    });
+    const client = fakeCommunities(fakeRelay());
+    new AgentsService(ctx, client.communities, fakeNative(), memoryStorage());
+    const selection = select.mock.lastCall?.[0];
+    if (!selection) throw new Error("No harness selection");
+    const owner = (id: string) =>
+      ctx.extend({
+        pluginOwner: bundledOwner(Object.freeze({ id, revision: "bundled" })),
+      });
+    const settle = () => {
+      settled = true;
+      for (const listener of listeners) listener();
+    };
+    return { owner, settle, selection };
+  };
+  try {
+    // The first plugin to call is asked at once; its list, deduplicated.
+    const first = start();
+    const other = vi.fn();
+    first
+      .owner("org.example")
+      .agents.gatewayHarnesses(() => ["codex", "goose", "codex"]);
+    first.owner("org.other").agents.gatewayHarnesses(other);
+    await expect(first.selection).resolves.toEqual(["codex", "goose"]);
+    expect(other).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining("org.other's gateway harnesses are ignored"),
+    );
+    expect(() =>
+      first.owner("org.bad").agents.gatewayHarnesses("nope" as never),
+    ).toThrow(/needs a function/);
+    // Only the runtime's bundled mark counts.
+    expect(() =>
+      first
+        .owner("org.example")
+        .extend({
+          pluginOwner: Object.freeze({ id: "org.poser", revision: "bundled" }),
+        })
+        .agents.gatewayHarnesses(other),
+    ).toThrow(/only to bundled plugins/);
+
+    // None calling once plugins have started: the access check's list
+    // stands, and a later call is too late.
+    const second = start();
+    second.settle();
+    await expect(second.selection).resolves.toBeUndefined();
+    second.owner("org.late").agents.gatewayHarnesses(other);
+    expect(other).not.toHaveBeenCalled();
+
+    // Anything but a list of harness names, or a failure, enables none.
+    for (const answer of [
+      () => "codex",
+      () => ["Codex"],
+      () => Array.from({ length: 33 }, (_, i) => `h${i}`),
+      () => Promise.reject(new Error("unreadable")),
+      () => undefined,
+    ]) {
+      const next = start();
+      next.owner("org.example").agents.gatewayHarnesses(answer);
+      await expect(next.selection).resolves.toEqual([]);
+    }
+
+    // A late answer enables none, and its signal aborts; plugins that never
+    // finish starting with none calling keep the access check's list. Both
+    // are bounded by one deadline from start-up.
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const stuck = start();
+    await vi.advanceTimersByTimeAsync(SOURCE_MS);
+    await expect(stuck.selection).resolves.toBeUndefined();
+    stuck.owner("org.late").agents.gatewayHarnesses(other);
+    expect(other).not.toHaveBeenCalled();
+    const sparse = start();
+    // biome-ignore lint/suspicious/noSparseArray: a hole must not pass
+    sparse.owner("org.example").agents.gatewayHarnesses(() => [, "codex"]);
+    await expect(sparse.selection).resolves.toEqual([]);
+    const late = start();
+    let signal!: AbortSignal;
+    late.owner("org.example").agents.gatewayHarnesses((given) => {
+      signal = given;
+      return new Promise(() => {});
+    });
+    await vi.advanceTimersByTimeAsync(SOURCE_MS);
+    await expect(late.selection).resolves.toEqual([]);
+    expect(signal.aborted).toBe(true);
+  } finally {
+    vi.useRealTimers();
+    select.mockRestore();
     warn.mockRestore();
   }
 });
@@ -23248,6 +23354,31 @@ describe("agent gateway gate", () => {
     await vi.waitFor(() => expect(f.run).toHaveBeenCalledTimes(1));
     expect(f.run.mock.calls[0]?.[0]).not.toHaveProperty("gateway");
     expect(f.run.mock.calls[0]?.[0]).not.toHaveProperty("gatewayFallback");
+  });
+
+  it("runs a harness the plugin's list leaves out unchanged, even when the access check refused", async () => {
+    const excludes = vi.spyOn(gatewayRoutes, "excludes").mockReturnValue(true);
+    try {
+      for (const capable of [true, "attribution"] as const)
+        for (const route of [
+          { ...blockedRoute, reason: "auth" as const },
+          { ...blockedRoute, reason: "readiness_pending" as const },
+          blockedRoute,
+          eligible,
+        ]) {
+          ready.mockResolvedValue(route);
+          const f = await mentioned(capable);
+          await vi.waitFor(() => expect(f.run).toHaveBeenCalledTimes(1));
+          expect(excludes).toHaveBeenCalledWith("relay");
+          const delivery = f.run.mock.calls[0]?.[0];
+          expect(delivery).not.toHaveProperty("gateway");
+          expect(delivery).not.toHaveProperty("gatewayFallback");
+          expect(f.activity.reader.work()[0]).not.toHaveProperty("notice");
+          gatewayRoutes.removeMembership(bot as never);
+        }
+    } finally {
+      excludes.mockRestore();
+    }
   });
 
   it("hands an eligible route and the turn's frozen context to a type that routes through the gateway", async () => {
