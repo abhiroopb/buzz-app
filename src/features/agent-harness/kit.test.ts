@@ -6,7 +6,6 @@ import { eventDto, type EventData, type RelayEvent } from "../relay/events";
 import type { RelayData } from "../relay/service";
 import { keypair, signed } from "../relay/testing";
 import { harnessKit } from "./kit";
-import { saved } from "./sections/fixtures/saved";
 
 const self = "c".repeat(64);
 const alice = "a".repeat(64);
@@ -83,9 +82,10 @@ function setup(
     agentMemories: { open: vi.fn() },
     workflowAuthority: workflowKey.pubkey,
   };
+  const state = { status: "ready" };
   const relay = {
     snapshot: () => ({
-      status: "ready",
+      status: state.status,
       session,
       viewer: alice,
       scope: `https://kit.example:${alice}`,
@@ -126,7 +126,7 @@ function setup(
       current: () => true,
       ...extra,
     }) as unknown as Delivery;
-  return { kit, agent, delivery, published, restored, read };
+  return { kit, agent, delivery, published, restored, read, session, state };
 }
 
 describe("harnessKit.conversation", () => {
@@ -396,8 +396,9 @@ describe("harnessKit.systemPrompt", () => {
     expect(text).toContain("~/work");
     expect(text).toContain(`<repos for="https://kit.example:${alice}"/>`);
     expect(text).not.toContain("<buzz-tools-unavailable>");
-    // Byte for byte what it was before the base prompt had sections.
-    expect(`${text}\n`).toBe(saved("kit.thread"));
+    await expect(text).toMatchFileSnapshot(
+      "./sections/snapshots/kit.thread.txt",
+    );
   });
 
   it("tells a session without tools that its final message is its reply", async () => {
@@ -502,6 +503,30 @@ describe("harnessKit.tools", () => {
     expect(JSON.stringify(without)).toContain("cannot read ./a.txt");
     await call(kit.tools(agent, conversation, { read }));
     expect(read).toHaveBeenCalledWith("./a.txt");
+  });
+
+  it("builds its client again after a reload, with the new session's relay key", async () => {
+    const { kit, agent, session, state } = setup();
+    const relay = keypair();
+    Object.assign(session, { relayAuthor: relay.pubkey });
+    state.status = "connecting";
+    // The call arrives mid-reload; its wait ends with the community ready.
+    Object.assign(agent, {
+      settle: vi.fn(async () => {
+        state.status = "ready";
+        return true;
+      }),
+    });
+    const answer = (await kit.tools(agent)({
+      jsonrpc: "2.0",
+      id: 4,
+      method: "tools/call",
+      params: { name: "solo_worker_connections", arguments: {} },
+    })) as unknown;
+    expect(agent.settle).toHaveBeenCalled();
+    expect(JSON.stringify(answer)).not.toContain(
+      "does not know its relay's key",
+    );
   });
 
   it("standalone prompts carry the agent's routing context", () => {

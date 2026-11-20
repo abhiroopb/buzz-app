@@ -471,7 +471,7 @@ Attention command processes on macOS and Linux stop when their app process exits
 Attention is shared by every harness, and a harness has no attention code.
 `src/buzz-mcp/session-tools.ts` exports `BUZZ_SESSION`: the Buzz tools and the
 Attention tools. How to use the Attention tools is in their own descriptions,
-not `BUZZ_PROMPT`. Every session gets the
+not the base prompt. Every session gets the
 same list and prompt, whether Attention is on or off, so turning Attention on or off never
 restarts a session or invalidates its prompt cache. `turnNote` gives the text
 to add at the end of each turn: the Attention review when Attention is on and
@@ -949,6 +949,16 @@ goose sessions end with the app, so a resumed goose turn opens a new one and is
 shown the mention's thread, including what it already posted there.
 Mentions queued behind a working turn, watch turns and other types are not
 kept.
+
+### Moving an agent off Codex
+
+Before an agent on the shared Codex server changes harness, Buzz asks Codex to
+stop the background terminals in each thread the agent used. Codex closes an
+idle thread by itself after about a minute and answers `thread not found` for
+it, so Buzz counts that thread as already cleaned. Any other cleanup error stops
+the harness change. A protected agent has its own Codex process, which Buzz
+shuts down instead. The conversation stays on disk, so an agent that returns to
+Codex resumes it.
 
 ### Saved Solo follow-ups
 

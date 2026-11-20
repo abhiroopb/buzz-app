@@ -31,9 +31,11 @@ import {
   referencedEmoji,
 } from "../features/relay/emoji";
 import { newer } from "../features/relay/events";
+import { normalizeName } from "../features/search/person-match";
 import {
   VERIFIED_PROFILE_BATCH,
   type VerifiedProfile,
+  type VerifiedProfileAuthority,
   verifiedProfile,
   verifiedProfileFilter,
   verifiedProfileSubject,
@@ -41,6 +43,10 @@ import {
 import { imageType } from "../features/relay/attachment-limits";
 import { LIVE_CANVAS_BYTES } from "../features/channel-templates/model";
 import { threadReference } from "../features/relay/thread-reference";
+import {
+  editedTags,
+  readableTags,
+} from "../features/agent-harness/turn-records";
 import { parseBuzzLink } from "../features/navigation/buzz-links";
 import { soloChannelMetadata } from "../features/relay/discovery";
 import { channelLabelTags } from "../features/relay/channel-labels";
@@ -395,7 +401,11 @@ export const TOOLS: readonly Tool[] = [
     { channel: str, pubkeys: strs },
     ["pubkeys"],
   ),
-  tool("users", "Profiles by pubkey or name.", { ids: strs, q: str }),
+  tool(
+    "users",
+    "Profiles by pubkey or name: each row's quoted profile name, then, for a name search, (verified: …) when the relay verified a different name, then the quoted about text.",
+    { ids: strs, q: str },
+  ),
   tool("dm", "Open a DM; returns its channel.", { to: strs }, ["to"]),
   tool(
     "mem_get",
@@ -1259,34 +1269,57 @@ const HANDLERS: Readonly<Record<string, Handler>> = {
     if (!ids.length && !q) throw new Error("Give ids or q.");
     if (ids.length && q) throw new Error("Give ids or q, not both.");
     if (ids.length > 100) throw new Error("Give at most 100 ids.");
-    // Name search matches only name and display_name, best match first;
-    // NIP-50 search matches the whole profile, so text in avatars or `about`
-    // can fill its results and hide the person asked for. Name search refuses
-    // a query longer than its limit, so a longer name uses NIP-50 search.
-    const named =
-      !ids.length && q && [...q].length <= PROFILE_SEARCH_QUERY_MAX
-        ? await client.searchProfiles?.(q, PROFILE_SEARCH_MAX)
-        : undefined;
+    const people = ids.length ? undefined : await tools.searchPeople(q ?? "");
     const profiles =
-      named?.filter((event) => event.kind === 0) ??
-      (await client.query([
-        ids.length
-          ? { kinds: [0], authors: ids, limit: ids.length }
-          : { kinds: [0], search: q, limit: 100 },
-      ]));
-    const rows = newest(profiles)
-      .map((event) => {
+      people?.profiles ??
+      (await client.query([{ kinds: [0], authors: ids, limit: ids.length }]));
+    const verified = people?.verified ?? new Map<string, VerifiedProfile>();
+    const shown = (pubkey: string, name: string) => {
+      const found = verified.get(pubkey);
+      const label = found && (found.fullName ?? found.displayName);
+      return label && label !== name ? ` (verified: ${label})` : "";
+    };
+    const byKey = new Map<string, { aliases: readonly string[]; row: string }>([
+      ...newest(profiles).map((event) => {
         const profile = parse(event.content);
         const name = profileName(profile) ?? "";
         const about =
           typeof profile.about === "string" && profile.about.trim()
-            ? ` — ${profile.about.trim().slice(0, 120)}`
+            ? ` — ${JSON.stringify(profile.about.trim().slice(0, 120))}`
             : "";
-        return { name, row: `${event.pubkey} ${name}${about}` };
-      })
+        return [
+          event.pubkey,
+          {
+            aliases: [
+              ...profileNames(profile),
+              ...verifiedAliases(verified.get(event.pubkey)),
+            ],
+            row: `${event.pubkey} ${JSON.stringify(name)}${shown(event.pubkey, name)}${about}`,
+          },
+        ] as const;
+      }),
+      ...[...verified]
+        .filter(([key]) => !profiles.some((event) => event.pubkey === key))
+        .map(
+          ([key, found]) =>
+            [
+              key,
+              {
+                aliases: verifiedAliases(found),
+                row: `${key}${shown(key, "")}`,
+              },
+            ] as const,
+        ),
+    ]);
+    const needle = normalizeName(q ?? "");
+    const rows = (people?.order ?? [...byKey.keys()])
+      .flatMap((key) => byKey.get(key) ?? [])
       .filter(
-        ({ name }) =>
-          !q || ids.length || named || name.toLowerCase().includes(q),
+        ({ aliases }) =>
+          !q ||
+          ids.length ||
+          people?.searched ||
+          aliases.some((alias) => normalizeName(alias).includes(needle)),
       );
     return rows.map(({ row }) => row).join("\n") || "No users.";
   },
@@ -2374,31 +2407,80 @@ class Tools {
     };
   }
 
-  /** The author `value` names: me, a pubkey or npub, or one display name. */
+  async searchPeople(q: string) {
+    let unknownKey = false;
+    const [named, relay] = await Promise.all([
+      [...q].length <= PROFILE_SEARCH_QUERY_MAX
+        ? this.client.searchProfiles?.(q, PROFILE_SEARCH_MAX)
+        : undefined,
+      this.client.relayAuthor ??
+        this.client.relayAuthorLookup?.().catch(() => {
+          unknownKey = true;
+          return undefined;
+        }),
+    ]);
+    const profiles = newest(
+      named?.filter((event) => event.kind === 0) ??
+        (await this.client.query([{ kinds: [0], search: q, limit: 100 }])),
+    );
+    const authority = relayAuthorityOf(relay);
+    const order = [
+      ...new Set(
+        (named ?? profiles).flatMap((event) =>
+          event.kind === 0
+            ? [event.pubkey]
+            : (authority &&
+                verifiedProfileSubject(event as RelayEvent, authority)) ||
+              [],
+        ),
+      ),
+    ];
+    const heads = named?.filter((event) => event.kind !== 0) ?? [];
+    const { names: verified, failed } = await this.verifiedNamesBy(
+      authority,
+      order,
+      heads,
+    );
+    return {
+      searched: !!named,
+      profiles,
+      verified,
+      order,
+      unverified: unknownKey || failed,
+    };
+  }
+
   async author(value: string) {
     if (value === "me") return this.client.pubkey;
     try {
       return pubkey(value);
     } catch {}
-    const q = value.toLowerCase();
-    const named =
-      [...q].length <= PROFILE_SEARCH_QUERY_MAX
-        ? await this.client.searchProfiles?.(q, PROFILE_SEARCH_MAX)
-        : undefined;
-    const profiles =
-      named?.filter((event) => event.kind === 0) ??
-      (await this.client.query([{ kinds: [0], search: q, limit: 100 }]));
-    const found = newest(profiles).filter(
-      (event) => profileName(parse(event.content))?.toLowerCase() === q,
+    const { profiles, verified, unverified } = await this.searchPeople(
+      value.toLowerCase(),
+    );
+    if (unverified)
+      throw new Error("Couldn't check verified names; try again.");
+    const names = new Map(
+      profiles.map((event) => [
+        event.pubkey,
+        profileNames(parse(event.content)),
+      ]),
+    );
+    const handle = normalizeName(value);
+    const found = [...new Set([...names.keys(), ...verified.keys()])].filter(
+      (key) =>
+        [...(names.get(key) ?? []), ...verifiedAliases(verified.get(key))].some(
+          (name) => normalizeName(name) === handle,
+        ),
     );
     if (found.length > 1)
       throw new Error(
         `${found.length} people are named ${value}; give their npub.\n${found
-          .map((event) => npubEncode(event.pubkey))
+          .map((key) => npubEncode(key))
           .join("\n")}`,
       );
     if (!found[0]) throw new Error(`No one is named ${value}.`);
-    return found[0].pubkey;
+    return found[0];
   }
 
   /** Display names of `pubkeys` that have a profile. */
@@ -2451,29 +2533,45 @@ class Tools {
    * reads them, so `send` and the app agree on who is verified. None without
    * the connection's relay key. */
   async verifiedNames(pubkeys: readonly string[]) {
+    return (
+      await this.verifiedNamesBy(
+        relayAuthorityOf(this.client.relayAuthor),
+        pubkeys,
+      )
+    ).names;
+  }
+
+  private async verifiedNamesBy(
+    authority: VerifiedProfileAuthority | undefined,
+    pubkeys: readonly string[],
+    known: readonly unknown[] = [],
+  ) {
     const names = new Map<string, VerifiedProfile>();
-    const relay = this.client.relayAuthor;
-    if (!relay || !HEX_KEY.test(relay)) return names;
-    const authority = { pubkey: relay, multipleIssuers: false };
+    let failed = false;
+    if (!authority) return { names, failed };
     const subjects = [...new Set(pubkeys)].filter((key) => HEX_KEY.test(key));
     const batches: string[][] = [];
     for (let at = 0; at < subjects.length; at += VERIFIED_PROFILE_BATCH)
       batches.push(subjects.slice(at, at + VERIFIED_PROFILE_BATCH));
-    const found = (
-      await Promise.all(
-        batches.map((batch) =>
-          this.client
-            .query([verifiedProfileFilter(relay, batch)])
-            .catch(() => []),
-        ),
-      )
-    ).flat();
+    const found = [
+      ...known,
+      ...(
+        await Promise.all(
+          batches.map((batch) =>
+            this.client
+              .query([verifiedProfileFilter(authority.pubkey, batch)])
+              .catch(() => {
+                failed = true;
+                return [];
+              }),
+          ),
+        )
+      ).flat(),
+    ];
     // The newest event at each address decides; a newer malformed or
     // retracted one leaves the person unverified, as in the app.
     const latest = new Map<string, RelayEvent>();
     for (const item of found) {
-      // Queries admit the events whose signatures they checked; the app's
-      // projection takes only those.
       const event = item as unknown as RelayEvent;
       const subject = verifiedProfileSubject(event, authority);
       if (!subject || !subjects.includes(subject)) continue;
@@ -2483,7 +2581,7 @@ class Tools {
       const verified = verifiedProfile(event, authority, true);
       if (verified) names.set(subject, verified);
     }
-    return names;
+    return { names, failed };
   }
 
   /** Messages oldest first with their latest edits, a line each: its ID,
@@ -2632,7 +2730,8 @@ class Tools {
   }
 }
 
-/** A message's line in a read, omitting what `scope` names. */
+/** A message's line in a read, omitting what `scope` names, then its other
+ * tags. */
 function messageLine(
   event: BuzzEvent,
   name: string | undefined,
@@ -2642,6 +2741,14 @@ function messageLine(
   const owner = tag(event, "auth");
   const reference = threadReference(event);
   const thread = reference?.rootId;
+  // The rest, but for the thread references the line already names.
+  const named = [reference?.rootId, reference?.parentId];
+  const tags = readableTags(event.tags).filter(
+    ([name, value, , marker]) =>
+      name !== "e" ||
+      (marker !== "root" && marker !== "reply") ||
+      !named.includes(value?.toLowerCase()),
+  );
   return [
     event.id,
     `from ${event.pubkey}`,
@@ -2652,6 +2759,7 @@ function messageLine(
     reference &&
       reference.parentId !== thread &&
       `reply_to ${reference.parentId}`,
+    tags.length > 0 && `tags ${JSON.stringify(tags)}`,
     `at ${time(event.created_at)}: ${event.content}`,
   ]
     .filter(Boolean)
@@ -2668,7 +2776,10 @@ function rootOf(event: BuzzEvent) {
   return ((root && reply ? root : reply)?.[1] ?? event.id) as string;
 }
 
-/** Messages oldest first, each showing its author's latest edit. */
+/** Messages oldest first, each showing its author's latest edit, with the
+ * files it leaves (none when it clears them, as the relay serves; the
+ * timeline's `foldMessages` still shows the last files) and its custom
+ * emoji. */
 function edited(events: readonly BuzzEvent[]) {
   const messages = events.filter((event) => event.kind !== 40003);
   const byId = new Map(messages.map((event) => [event.id, event]));
@@ -2676,12 +2787,11 @@ function edited(events: readonly BuzzEvent[]) {
   for (const event of events)
     if (event.kind === 40003) {
       const target = tag(event, "e");
-      const message = target ? byId.get(target) : undefined;
       const last = target && edits.get(target);
       // Authorship first, so someone else's newer edit hides none.
       if (
         target &&
-        message?.pubkey === event.pubkey &&
+        byId.get(target)?.pubkey === event.pubkey &&
         (!last || last.created_at < event.created_at)
       )
         edits.set(target, event);
@@ -2689,7 +2799,18 @@ function edited(events: readonly BuzzEvent[]) {
   return messages
     .map((event) => {
       const edit = edits.get(event.id);
-      return edit ? { ...event, content: edit.content } : event;
+      return edit
+        ? {
+            ...event,
+            content: edit.content,
+            tags: editedTags(
+              event.tags,
+              edit.tags,
+              (edit.tags.some(([name]) => name === "emoji") ? edit : event)
+                .tags,
+            ),
+          }
+        : event;
     })
     .sort((a, b) => a.created_at - b.created_at);
 }
@@ -2882,6 +3003,18 @@ const NAME_WEIGHT = {
 
 const HEX_KEY = /^[0-9a-f]{64}$/;
 
+const relayAuthorityOf = (relay: string | undefined) =>
+  relay && HEX_KEY.test(relay)
+    ? { pubkey: relay, multipleIssuers: false }
+    : undefined;
+
+const verifiedAliases = (verified: VerifiedProfile | undefined) =>
+  verified
+    ? [verified.displayName, verified.username, verified.fullName].filter(
+        (name): name is string => !!name,
+      )
+    : [];
+
 /** Who a name tags: everyone holding it in its strongest form. */
 function bestNamed(holders: ReadonlyMap<string, number> | undefined) {
   if (!holders?.size) return [];
@@ -2891,10 +3024,12 @@ function bestNamed(holders: ReadonlyMap<string, number> | undefined) {
     .map(([key]) => key);
 }
 
-const profileName = (profile: Record<string, unknown>) =>
-  [profile.display_name, profile.name].find(
+const profileNames = (profile: Record<string, unknown>) =>
+  [profile.display_name, profile.name].filter(
     (name): name is string => typeof name === "string" && !!name.trim(),
   );
+const profileName = (profile: Record<string, unknown>) =>
+  profileNames(profile)[0];
 function parse(content: string): Record<string, unknown> {
   try {
     const value = JSON.parse(content);
