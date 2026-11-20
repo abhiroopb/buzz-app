@@ -56,16 +56,47 @@
 }
 
 @media (hover: hover) and (pointer: fine) {
+  .teamRow {
+    position: relative;
+  }
+
   .teamRow [data-solo-channel-new-task] {
     opacity: 0;
+  }
+
+  /* The disclosure takes the row icon's place while the row is pointed at
+     or holds keyboard focus. */
+  .teamRowSlot > [data-solo-disclosure] {
+    position: absolute;
+    z-index: 2;
+    inset-block-start: var(--space-half);
+    inset-inline-start: var(--space-2);
+    width: 1.25rem;
+    height: var(--space-6);
+    min-height: 0;
+    padding: 0;
+    opacity: 0;
+  }
+
+  .teamRow:has(
+    > :first-child:hover,
+    > .teamRowSlot > :not(.teamRowBody):hover,
+    :focus-visible
+  ) {
+    & [data-solo-channel-new-task],
+    & > .teamRowSlot > [data-solo-disclosure] {
+      opacity: 1;
+    }
   }
 
   .teamRow:has(
       > :first-child:hover,
       > .teamRowSlot > :not(.teamRowBody):hover,
-      :focus-visible
+      > :first-child :focus-visible,
+      > .teamRowSlot > :not(.teamRowBody):focus-visible
     )
-    [data-solo-channel-new-task] {
-    opacity: 1;
+    > :first-child
+    [data-channel-row-icon] {
+    visibility: hidden;
   }
 }
