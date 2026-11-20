@@ -13,6 +13,18 @@ import styles from "./CommunityAdmin.module.css";
 
 const message = (reason: unknown) =>
   reason instanceof Error ? reason.message : String(reason);
+// Exact relay revoke refusal codes, forwarded unchanged by the broker.
+const REVOKE_REFUSALS: Record<string, string> = {
+  invite_not_found: "No invite link in this community matches that link.",
+  invite_not_revocable:
+    "This link can’t be revoked. It stops working when it expires or reaches its use limit.",
+  invite_restricted:
+    "You can’t revoke invite links while you’re restricted in this community.",
+};
+const revokeMessage = (reason: unknown) => {
+  const text = message(reason);
+  return Object.hasOwn(REVOKE_REFUSALS, text) ? REVOKE_REFUSALS[text] : text;
+};
 const STATUS: Record<InviteSummary["status"], string> = {
   active: "Active",
   revoked: "Revoked",
@@ -76,6 +88,12 @@ export function InviteLinks({
   // Confirmed revocations by id; they win over any list read that raced them.
   const [revoked, setRevoked] = useState<Record<string, number>>({});
   const reads = useRef(0);
+  const listRef = useRef<HTMLUListElement>(null);
+  // A revoked row loses its Revoke button, so focus moves to the list instead.
+  const [focusList, setFocusList] = useState(0);
+  useEffect(() => {
+    if (focusList) listRef.current?.focus();
+  }, [focusList]);
 
   const load = useCallback(
     async (before?: string) => {
@@ -148,11 +166,12 @@ export function InviteLinks({
       );
       setRevoked((shown) => ({ ...shown, [receipt.id]: receipt.revoked_at }));
       if ("code" in pending) setPasted("");
+      else setFocusList((n) => n + 1);
       setPending(null);
       setNotice("Invite link revoked. People who already joined stay in.");
     } catch (reason) {
       // The outcome may be unknown after a timeout; Refresh shows what the relay holds.
-      setRevokeError(message(reason));
+      setRevokeError(revokeMessage(reason) ?? "");
     } finally {
       setRevoking(false);
     }
@@ -239,7 +258,12 @@ export function InviteLinks({
             No invite links yet.
           </p>
         ) : (
-          <ul className={styles.members} aria-label="Invite links">
+          <ul
+            ref={listRef}
+            tabIndex={-1}
+            className={styles.members}
+            aria-label="Invite links"
+          >
             {shown.map((invite) => {
               // Creation time and a short id tell one creator's links apart.
               const label = `Link ${invite.id.slice(0, 8)} by ${name(invite.created_by)}, created ${created(invite.created_at)}`;

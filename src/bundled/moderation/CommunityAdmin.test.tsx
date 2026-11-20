@@ -813,7 +813,7 @@ const unavailable = () =>
 it("shows a revoke from its receipt and keeps older pages on refresh", async () => {
   const user = userEvent.setup();
   let reads = 0;
-  broker({
+  const calls = broker({
     invites: (body) => {
       reads++;
       if ((body as { before?: string }).before)
@@ -837,6 +837,11 @@ it("shows a revoke from its receipt and keeps older pages on refresh", async () 
   const list = await screen.findByRole("list", { name: "Invite links" });
   await user.click(screen.getByRole("button", { name: "Show more" }));
   await waitFor(() =>
+    expect(calls.filter((c) => c.route === "invites").at(-1)?.body).toEqual({
+      before: `1699999999_${linkId(1)}`,
+    }),
+  );
+  await waitFor(() =>
     expect(within(list).getAllByRole("listitem")).toHaveLength(2),
   );
 
@@ -851,6 +856,7 @@ it("shows a revoke from its receipt and keeps older pages on refresh", async () 
     }),
   );
   await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+  await waitFor(() => expect(list).toHaveFocus());
   const [first] = within(list).getAllByRole("listitem");
   expect(first).toHaveTextContent("Revoked");
   expect(within(first as HTMLElement).queryByRole("button")).toBeNull();
@@ -912,7 +918,7 @@ it("keeps the confirmation open with a retry when revoke fails", async () => {
     invites: () => Response.json({ invites: [link(1)], next_before: null }),
     "invite-revoke": () =>
       ++attempts === 1
-        ? unavailable()
+        ? Response.json({ error: "invite_not_found" }, { status: 404 })
         : Response.json({ id: linkId(1), revoked_at: 1700000100 }),
   });
   const { relay: data } = relay(owner);
@@ -923,8 +929,9 @@ it("keeps the confirmation open with a retry when revoke fails", async () => {
   const dialog = await screen.findByRole("alertdialog");
   await user.click(within(dialog).getByRole("button", { name: "Revoke" }));
   expect(await within(dialog).findByRole("alert")).toHaveTextContent(
-    "community writes are temporarily unavailable",
+    "No invite link in this community matches that link.",
   );
+  expect(dialog).not.toHaveTextContent("invite_not_found");
   expect(dialog).toHaveTextContent(/Link 1b9c8f7e/);
   await user.click(within(dialog).getByRole("button", { name: "Retry" }));
   await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
