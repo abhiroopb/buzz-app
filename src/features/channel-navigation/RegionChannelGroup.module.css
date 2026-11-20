@@ -66,7 +66,8 @@
     position: absolute;
     z-index: 2;
     inset-block-start: calc(-1 * var(--space-half));
-    inset-inline-end: var(--space-1);
+    inset-inline-end: var(--space-2);
+    color: var(--text-subtle);
     opacity: 0;
   }
 
@@ -98,7 +99,7 @@
     &:has(> .teamRowSlot > [data-solo-channel-new-task])
       > :first-child
       [data-channel-id] {
-      padding-inline-end: var(--size-control-sm);
+      padding-inline-end: calc(var(--size-control-sm) + var(--space-1));
 
       & [class~="navigation-item-trailing"] {
         display: none;
