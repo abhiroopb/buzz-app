@@ -106,6 +106,20 @@ const conversationRead = (sent: RelayEvent): readonly ReadFilter[] => {
   ];
 };
 
+/** The relay's page of `records` for `filter`: newest first, ties by id,
+ * below its cursor. */
+const relayPage = (records: readonly RelayEvent[], filter: ReadFilter) =>
+  records
+    .filter(
+      (event) =>
+        matchFilter(filter as Filter, event) &&
+        (!filter.before_id ||
+          event.created_at < (filter.until ?? Infinity) ||
+          event.id > filter.before_id),
+    )
+    .sort((a, b) => b.created_at - a.created_at || a.id.localeCompare(b.id))
+    .slice(0, filter.limit);
+
 /** A transport that answers from `records`, recording every request it sees.
  * While `offline`, every request fails as an unreachable relay's does. */
 function countedTransport(records: RelayEvent[]) {
@@ -125,6 +139,9 @@ function countedTransport(records: RelayEvent[]) {
       };
       requests.push(request);
       if (state.offline) throw new Error("Relay unreachable");
+      // A mention catch-up pages by time, as the relay does.
+      if (filters.length === 1 && filters[0]?.["#p"])
+        return relayPage(records, filters[0]);
       return records.filter((event) =>
         filters.some((filter) => filter.kinds?.includes(event.kind)),
       );
@@ -932,23 +949,27 @@ async function agentOnlyDm({
     earlier,
     sent,
   ]);
+  let withheld: number | undefined;
   const query = async (_member: unknown, filters: readonly object[]) =>
     (filters as readonly ReadFilter[]).flatMap((filter) =>
-      records
-        .filter(
-          (event) =>
-            matchFilter(filter as Filter, event) &&
-            (!filter.before_id ||
-              event.created_at < (filter.until ?? Infinity) ||
-              event.id > (filter.before_id ?? "")),
-        )
-        .sort((a, b) => b.created_at - a.created_at || a.id.localeCompare(b.id))
-        .slice(0, filter.limit),
+      relayPage(
+        records.filter((event) => event.kind !== withheld),
+        filter,
+      ),
     );
-  return { sent, query };
+  return {
+    sent,
+    query,
+    withhold: (kind?: number) => {
+      withheld = kind;
+    },
+  };
 }
 
-async function gooseSetup(prepare?: (storage: AgentStore) => unknown) {
+async function gooseSetup(
+  prepare?: (storage: AgentStore) => unknown,
+  initialMessages: RelayEvent[] = [],
+) {
   const { goose, host } = gooseHost();
   const { seeded } = heads("buzz/goose", {
     model: "synced-model",
@@ -975,7 +996,7 @@ async function gooseSetup(prepare?: (storage: AgentStore) => unknown) {
     { ...GOOSE_LOCAL },
     seeded,
     synced(),
-    [],
+    initialMessages,
     prepare,
   );
   return { ...f, goose, runtime };
@@ -1110,4 +1131,40 @@ it("keeps an agent-only DM out of the owner's saved conversations and labels", a
   expect(f.runtime.channelLabel(key, channel)).toMatchObject({
     name: "general",
   });
+});
+
+it("keeps a DM mention pending while the relay gives only part of its details", async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  const f = await gooseSetup();
+  const dm = await agentOnlyDm();
+  dm.withhold(39002);
+  f.native.query.mockImplementation(dm.query);
+  const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+  await vi.advanceTimersByTimeAsync(50_000);
+  expect(f.deliveries).toHaveLength(0);
+  expect(warn).toHaveBeenCalledWith(
+    expect.stringContaining("could not catch up its private mentions"),
+    expect.any(Error),
+  );
+  dm.withhold();
+  await vi.advanceTimersByTimeAsync(300_000);
+  await vi.waitFor(() => expect(f.goose.geese[0]?.turns).toHaveLength(1));
+  expect(f.deliveries).toHaveLength(1);
+});
+
+it("keeps the owner's mention catch-up going while the agent's own reads fail", async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  const f = await gooseSetup();
+  f.native.query.mockRejectedValue(new Error("Agent read refused"));
+  const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+  const ownerReads = () => f.requests.filter(mentionCatchUp).length;
+  await vi.advanceTimersByTimeAsync(50_000);
+  const first = ownerReads();
+  expect(first).toBeGreaterThan(0);
+  expect(warn).toHaveBeenCalledWith(
+    expect.stringContaining("could not catch up its private mentions"),
+    expect.any(Error),
+  );
+  await vi.advanceTimersByTimeAsync(100_000);
+  expect(ownerReads()).toBeGreaterThan(first);
 });

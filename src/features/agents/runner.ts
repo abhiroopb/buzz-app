@@ -103,6 +103,7 @@ import {
   inStream,
   MENTIONS,
   oldestFirst,
+  PRIVATE_MENTIONS,
   POLL_OVERLAP,
   readWindow,
   streamKey,
@@ -504,8 +505,12 @@ export type RunnerHost = {
    * channel is public; undefined as for `member`. Only a member may be
    * delivered to. */
   reads(agent: Agent, event: Pick<RelayEvent, "tags">): boolean | undefined;
-  mentionsReady?(agent: Agent): boolean;
-  readMentions?(
+  /** Whether the agent's own read of DMs its owner cannot read is due: false
+   * while it backs off, undefined when it has none here. */
+  privateMentionsDue?(agent: Agent): boolean | undefined;
+  /** Reads the agent's mentions as itself, failing while any DM they are in
+   * is only partly known. */
+  readPrivateMentions?(
     agent: Agent,
     filter: ReadFilter,
     signal: AbortSignal,
@@ -524,6 +529,8 @@ export type RunnerHost = {
     channels: readonly string[],
     signal: AbortSignal,
   ): Promise<void>;
+  /** Whether the event is in a DM only the agent, not its owner, can read. */
+  ownerHidden?(agent: Agent, event: RelayEvent): boolean;
   /** Whether the event's channel is a DM between the agent and one other. */
   dm(agent: Agent, event: RelayEvent): boolean;
   /** Whether the event came as it would have with no watch keeping channels
@@ -1641,7 +1648,14 @@ export class AgentRunners {
         const checkpoint = this.checkpoints[stream.key];
         // Mentions are answered with Attention off or not shown.
         const hidden = !shown && !stream.mentions;
-        if (!(stream.mentions ? runner.type?.run : on) || !stream.enabled) {
+        const unread =
+          stream.private &&
+          (!agent || this.host.privateMentionsDue?.(agent) === undefined);
+        if (
+          !(stream.mentions ? runner.type?.run : on) ||
+          !stream.enabled ||
+          unread
+        ) {
           // Saved too, so one turned on after a restart starts from about
           // when this copy last saw it off, or from when Attention is shown.
           this.quiet.add(stream.key);
@@ -1667,7 +1681,8 @@ export class AgentRunners {
           (stream.channel === undefined ||
             !community?.session.attendPending(stream.channel)) &&
           (runner.readRetries.get(stream.key)?.failure.retryAt ?? 0) <=
-            Date.now()
+            Date.now() &&
+          !(stream.private && !this.host.privateMentionsDue?.(agent as Agent))
         )
           reading.push(stream);
       }
@@ -1701,7 +1716,6 @@ export class AgentRunners {
           catching([]);
           continue;
         }
-        if (mentions && this.host.mentionsReady?.(agent) === false) continue;
         const attention = mentions ? undefined : agent.attention;
         if (
           pass &&
@@ -1938,28 +1952,32 @@ export class AgentRunners {
       pass.community.controller.signal,
     ]);
     const name = () => this.host.agent(runner.key)?.name;
-    const read = async (filter: ReadFilter) => {
+    const read = (stream: Stream) => async (filter: ReadFilter) => {
       // Only the relay's page: read() also adds events the session observed
       // meanwhile and the owner's messages not yet sent, and an older one of
       // those would page past events the relay has not returned yet.
       const agent = this.host.agent(runner.key);
-      const events =
-        filter["#p"] && agent && this.host.readMentions
-          ? await this.host.readMentions(agent, filter, signal)
-          : await pass.community.session.readRemote([filter], {
-              signal,
-              priority: "background",
-              fresh: true,
-              // Of every channel: a public one the session does not know yet too.
-              ...(filter["#h"] ? {} : { resolveChannels: true }),
-            });
+      const events = stream.private
+        ? agent && this.host.readPrivateMentions
+          ? await this.host.readPrivateMentions(agent, filter, signal)
+          : []
+        : await pass.community.session.readRemote([filter], {
+            signal,
+            priority: "background",
+            fresh: true,
+            // Of every channel: a public one the session does not know yet too.
+            ...(filter["#h"] ? {} : { resolveChannels: true }),
+          });
       signal.throwIfAborted();
       // Only what the relay signed.
       const signed = events.filter(hasEventProof) as RelayEvent[];
       for (const event of signed)
         this.readAddressable.set(
           event,
-          !!agent && this.host.unattended(agent, event, false),
+          !!agent &&
+            this.host.unattended(agent, event, false) &&
+            // The owner's mentions stream gives the rest.
+            (!stream.private || !!this.host.ownerHidden?.(agent, event)),
         );
       return signed;
     };
@@ -1976,7 +1994,7 @@ export class AgentRunners {
               stream,
               this.checkpoints[stream.key],
               typeof upper === "number" ? upper : upper(stream),
-              read,
+              read(stream),
             )
               .then((window) => {
                 signal.throwIfAborted();
@@ -1985,6 +2003,13 @@ export class AgentRunners {
                 return window;
               })
               .catch((error) => {
+                if (stream.private && !signal.aborted) {
+                  console.warn(
+                    `Agent ${name()} could not catch up its private mentions`,
+                    error,
+                  );
+                  return undefined;
+                }
                 if (signal.aborted || stream.mentions) throw error;
                 const object = pass.attention?.[slug];
                 if (!object) throw error;
@@ -2316,7 +2341,10 @@ export class AgentRunners {
       ),
       // Mentions need no record: a membership added to a community has none
       // until something is saved for it there.
-      ...[...this.runners.keys()].map((key) => streamKey(key, MENTIONS)),
+      ...[...this.runners.keys()].flatMap((key) => [
+        streamKey(key, MENTIONS),
+        streamKey(key, PRIVATE_MENTIONS),
+      ]),
     ]);
     this.checkpoints = Object.fromEntries(
       Object.entries(this.checkpoints).filter(([key]) => keys.has(key)),

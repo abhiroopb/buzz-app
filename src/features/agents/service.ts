@@ -2673,22 +2673,26 @@ export class AgentsService extends Service implements Agents {
       savedAttention: (key) => this.records[key]?.attention ?? EMPTY,
       member: (agent, event) => this.member(agent, event),
       reads: (agent, event) => this.reads(agent, event),
-      mentionsReady: (agent) => this.inbox(agent.key)?.due() ?? true,
-      readMentions: (agent, filter, signal) => {
+      privateMentionsDue: (agent) => this.inbox(agent.key)?.due(),
+      readPrivateMentions: (agent, filter, signal) => {
         const inbox = this.inbox(agent.key);
-        if (inbox) return inbox.mentions(filter, signal);
-        const session = this.bindingOf(agent)?.session;
-        if (!session)
-          throw new Error("The agent's community is no longer connected");
-        return session.readRemote([filter], {
-          signal,
-          priority: "background",
-          fresh: true,
-          resolveChannels: true,
-        });
+        if (!inbox) throw new Error("The agent has no reads of its own here");
+        return inbox.mentions(filter, signal);
+      },
+      ownerHidden: (agent, event) => {
+        const channel = event.tags.find((tag) => tag[0] === "h")?.[1];
+        const channels = this.bindingOf(agent)?.session.channels;
+        return (
+          !!channel &&
+          !!this.inbox(agent.key)?.channel(channel) &&
+          !(
+            channels?.list().channels.some((item) => item.id === channel) ||
+            channels?.get?.(channel)
+          )
+        );
       },
       readAsAgent: (agent, filter, signal) =>
-        this.inbox(agent.key)?.read(filter, signal),
+        this.inbox(agent.key)?.readAsAgent(filter, signal),
       resolveChannels: async (agent, ids, signal) => {
         const channels = this.bindingOf(agent)?.session.channels;
         const unknown = ids.filter(

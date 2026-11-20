@@ -4,6 +4,7 @@
 // owner-facing list, label and transcript passes through these.
 import { promptChannel, type TranscriptTurn } from "./activity-transcript";
 import type { AgentReads } from "./reads";
+import type { SessionUsage } from "./service";
 
 type Place = Readonly<{ channelId: string; community?: true }>;
 
@@ -44,3 +45,16 @@ export function ownerTurns<T extends TranscriptTurn>(
     );
   });
 }
+
+/** The sessions' usage, without where and what a session was about when the
+ * owner cannot read its channel: its cost is the owner's, its content not. */
+export const ownerUsage = (
+  sessions: readonly SessionUsage[],
+  reads: AgentReads | undefined,
+) =>
+  sessions.map((session) => {
+    if (!session.channelId || reads?.ownerReadable(session.channelId))
+      return session;
+    const { channelId: _, root: __, title: ___, ...rest } = session;
+    return rest;
+  });

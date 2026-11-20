@@ -5,7 +5,7 @@ import { turnInput } from "../../bundled/codex/prompt";
 import { codexTurns } from "../../bundled/codex/transcript";
 import type { EventData } from "../relay/events";
 import type { TranscriptTurn } from "./activity-transcript";
-import { ownerTurns } from "./owner-view";
+import { ownerTurns, ownerUsage } from "./owner-view";
 import type { AgentReads } from "./reads";
 
 const agent = "a".repeat(64);
@@ -136,4 +136,28 @@ it("shows nothing of a conversation in a channel the owner cannot read", () => {
   expect(ownerTurns(turns, reads, { channelId: hidden })).toEqual([]);
   expect(ownerTurns(turns, reads, { channelId: open })).toHaveLength(1);
   expect(ownerTurns(turns, undefined, { channelId: open })).toEqual([]);
+});
+
+it("keeps a hidden channel's usage but not where or what it was", () => {
+  const session = (channelId: string) => ({
+    id: channelId,
+    revision: "1",
+    gaps: [],
+    channelId,
+    root: "r".repeat(64),
+    title: `About ${channelId}`,
+    startedAt: 1,
+    lastAt: 2,
+    observations: [],
+  });
+  const [shown, kept] = ownerUsage([session(open), session(hidden)], reads);
+  expect(shown).toEqual(session(open));
+  expect(kept).toEqual({
+    id: hidden,
+    revision: "1",
+    gaps: [],
+    startedAt: 1,
+    lastAt: 2,
+    observations: [],
+  });
 });

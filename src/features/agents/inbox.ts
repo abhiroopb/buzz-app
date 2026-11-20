@@ -100,8 +100,12 @@ export class AgentInbox {
     return this.lifetime.aborted ? undefined : this.channels.get(id);
   }
 
-  private async resolve(ids: readonly string[], signal: AbortSignal) {
-    if (!ids.length) return;
+  /** Resolves the channels, returning those the relay gave only part of. */
+  private async resolve(
+    ids: readonly string[],
+    signal: AbortSignal,
+  ): Promise<string[]> {
+    if (!ids.length) return [];
     const events = await this.reader.reader.read(
       [
         {
@@ -113,13 +117,18 @@ export class AgentInbox {
       ],
       { signal: AbortSignal.any([this.lifetime, signal]), fresh: true },
     );
+    const kinds = new Map<string, Set<number>>();
     const discovery = new DiscoveryState(
       this.pubkey,
       this.authority,
       2 * 1024 * 1024,
     );
     for (const event of events)
-      if (hasEventProof(event)) discovery.accept(event);
+      if (hasEventProof(event)) {
+        discovery.accept(event);
+        const id = event.tags.find(([key]) => key === "d")?.[1];
+        if (id) kinds.set(id, (kinds.get(id) ?? new Set()).add(event.kind));
+      }
     for (const id of ids) {
       this.channels.delete(id);
       const channel = discovery.get(id);
@@ -127,9 +136,10 @@ export class AgentInbox {
         this.channels.set(id, channel);
     }
     for (const listener of this.listeners) listener();
+    return ids.filter((id) => kinds.get(id)?.size === 1);
   }
 
-  async read(filter: ReadFilter, signal: AbortSignal) {
+  private async read(filter: ReadFilter, signal: AbortSignal) {
     const events = await this.reader.reader.read([filter], {
       signal: AbortSignal.any([this.lifetime, signal]),
       priority: "background",
@@ -145,16 +155,22 @@ export class AgentInbox {
       ),
     ];
     const known = await Promise.all(ids.map((id) => this.owner.channel(id)));
-    await this.resolve(
+    const partial = await this.resolve(
       ids.filter((_, index) => !known[index]),
       signal,
     );
-    return events;
+    return { events, partial };
+  }
+
+  async readAsAgent(filter: ReadFilter, signal: AbortSignal) {
+    return (await this.read(filter, signal)).events;
   }
 
   async mentions(filter: ReadFilter, signal: AbortSignal) {
     try {
-      const events = await this.read(filter, signal);
+      const { events, partial } = await this.read(filter, signal);
+      if (partial.length)
+        throw new Error("The relay returned only part of a DM's details");
       if (events.length < filter.limit) this.schedule(0);
       return events;
     } catch (error) {
