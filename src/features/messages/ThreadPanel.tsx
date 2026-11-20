@@ -2211,8 +2211,8 @@ function ThreadMessages({
   const composerRootId = composerRoot?.id;
   useLayoutEffect(() => {
     if (navigation && composerRootId)
-      applyLinkDraft(navigation, scope, channelId, composerRootId);
-  }, [navigation, scope, channelId, composerRootId]);
+      applyLinkDraft(navigation, scope, channelId, messageId, composerRootId);
+  }, [navigation, scope, channelId, messageId, composerRootId]);
   const retryThread = () => {
     if (showOlderPageStatus) {
       if (scroller.current) captureOlderAnchor(scroller.current);

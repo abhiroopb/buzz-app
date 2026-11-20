@@ -519,6 +519,14 @@ it("carries a message link's draft as plain text for the conversation it opens",
   expect(parseBuzzLink(`${example}&draft=${"x".repeat(2000)}`)).toMatchObject({
     draft: "x".repeat(2000),
   });
+  // Line breaks arrive as CRLF or CR from some sources; the composer keeps LF.
+  expect(parseBuzzLink(`${example}&draft=a%0D%0Ab%0Dc`)).toMatchObject({
+    draft: "a\nb\nc",
+  });
+  // Markup and commands stay inert text for the person to review.
+  expect(
+    parseBuzzLink(`${example}&draft=${encodeURIComponent("<b>/leave</b>")}`),
+  ).toMatchObject({ draft: "<b>/leave</b>" });
   // The channel forms carry everything in the path and still ignore a query.
   expect(parseBuzzLink("buzz://channel/general?draft=hi")).toEqual({
     format: "legacy",
@@ -533,6 +541,9 @@ it.each([
   ["a NUL", "draft=a%00b"],
   ["an escape sequence", "draft=%1B%5B2J"],
   ["a delete character", "draft=a%7Fb"],
+  ["a C1 control", "draft=a%C2%85b"],
+  ["a bidirectional override", "draft=a%E2%80%AEb"],
+  ["a bidirectional isolate", "draft=a%E2%81%A6b"],
 ])("rejects a message link whose draft is %s", (_name, query) => {
   expect(parseBuzzLink(`${example}&${query}`)).toBeNull();
   expect(buzzLinkTarget(`${example}&${query}`, scope)).toBeNull();
