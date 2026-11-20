@@ -65,7 +65,7 @@ import { threadReference } from "../../features/relay/thread-reference";
 import type { ChannelLabel } from "../../features/channels/channel-icon";
 import { appClient, readFile } from "../../buzz-mcp/app-client";
 import { readAuthorNames } from "../../features/agent-harness/author-names";
-import { readProject } from "../../features/agent-harness/project";
+import { project, readCanvas } from "../../features/agent-harness/project";
 import type { Facts } from "../../features/agent-harness/sections/index";
 import {
   referencedFolders,
@@ -161,6 +161,8 @@ type Request = {
   sessionContext?: string;
   /** The Solo chat's workspace Canvas section, if it has one. */
   project?: string;
+  /** `project` for a turn that works where `elsewhere` says. */
+  projectAt?: (elsewhere: boolean) => string | undefined;
   canvas?: Project;
   solo?: boolean;
   /** The model and effort the owner picked for this turn. */
@@ -224,6 +226,8 @@ type Active = {
   model?: string;
   effort?: string;
   workspace: string;
+  /** Whether it works elsewhere, which its Canvas states the rule from. */
+  elsewhere?: boolean;
   signal: AbortSignal;
   tools: AbortController;
   /** Every request this turn has taken in, the first and each steered one. */
@@ -2139,22 +2143,35 @@ export class CodexRuntime {
     if (wake && !wakeLands(wake, topLevel)) return delivery.ignored?.();
     // Only a Solo chat's Canvas is handed over.
     const canvas = reads.canvas?.bind(reads);
-    const [canvasProject, folders] = await Promise.all([
+    const [canvasRead, folders] = await Promise.all([
       solo
-        ? readProject(canvas && (() => canvas(channelId, agent.owner)))
+        ? readCanvas(canvas && (() => canvas(channelId, agent.owner)))
         : undefined,
       referencedFolders(event, agent.owner, reads.scope),
     ]);
-    const project =
+    const skills = referencedSkills(event, agent.owner, agent.pubkey);
+    // The Canvas states the rule for its folders from whether the
+    // conversation has one of its own, which a plugin can assign as its
+    // session is admitted. A turn renders it again for where it works.
+    // A community session works in the agent's workspace, as
+    // `conversationPlace` has it, whatever folder the chat kept.
+    const canvasProjectOf = (
+      elsewhere = configuredSettings.scope !== "community" &&
+        // A Solo chat is one conversation, with no thread root.
+        Boolean(this.folder(reads.scope, agent.key, channelId)),
+    ) => canvasRead && project(canvasRead.text, elsewhere);
+    const projectOf = (elsewhere?: boolean) =>
       [
         configuredSettings.scope === "community"
           ? undefined
-          : canvasProject?.section,
+          : canvasProjectOf(elsewhere)?.section,
         folders.section,
-        referencedSkills(event, agent.owner, agent.pubkey),
+        skills,
       ]
         .filter(Boolean)
         .join("\n\n") || undefined;
+    const canvasProject = canvasProjectOf();
+    const projectText = projectOf();
     // A stop during the reads deleted this agent's entry; recreating it would
     // reopen the agent.
     delivery.signal.throwIfAborted();
@@ -2311,7 +2328,11 @@ export class CodexRuntime {
         : {}),
       ...(canvasProject ? { canvas: canvasProject } : {}),
       ...(solo ? { solo: true } : {}),
-      ...(project ? { project: `${project}\n` } : {}),
+      ...(projectText ? { project: `${projectText}\n` } : {}),
+      projectAt: (elsewhere: boolean) => {
+        const text = projectOf(elsewhere);
+        return text && `${text}\n`;
+      },
       answered,
       failActivity,
       ...(delivery.accepted ? { accepted: delivery.accepted } : {}),
@@ -2382,6 +2403,12 @@ export class CodexRuntime {
             request.sessionContext = admitted.context;
           else delete request.sessionContext;
         }
+        const admittedProject = projectOf();
+        if (admittedProject) request.project = `${admittedProject}\n`;
+        else delete request.project;
+        const admittedCanvas = canvasProjectOf();
+        if (admittedCanvas) request.canvas = admittedCanvas;
+        else delete request.canvas;
         if (queueCommunity) return;
         const text = textOf(request.event, agent.name);
         const lane = laneFor(entry, key, false);
@@ -2445,7 +2472,7 @@ export class CodexRuntime {
                 threadId: active.threadId,
                 expectedTurnId: active.turnId,
                 input: input(
-                  `${context}${project ? `${project}\n\n` : ""}${request.project ?? ""}${turnInput(request.agent.key, request.event, request.conversation, text, true, noteOf(request), wake, this.reads(request.agent.key)?.authorNames?.(request.event.pubkey))}`,
+                  `${context}${project ? `${project}\n\n` : ""}${(active.elsewhere === undefined ? request.project : request.projectAt?.(active.elsewhere)) ?? ""}${turnInput(request.agent.key, request.event, request.conversation, text, true, noteOf(request), wake, this.reads(request.agent.key)?.authorNames?.(request.event.pubkey))}`,
                 ),
               });
               request.steering = steered.then(
@@ -3692,6 +3719,8 @@ export class CodexRuntime {
       return {
         threadId,
         workspace,
+        // Where it works, which its Canvas states the rule from.
+        elsewhere: Boolean(home),
         params,
         model,
         effort,
@@ -3825,6 +3854,7 @@ export class CodexRuntime {
       // A refusal outside this turn does not explain how it ends.
       explain = server.explainer?.(threadId);
       active.workspace = workspace;
+      active.elsewhere = loaded.elsewhere;
       active.model = model;
       active.effort = effort;
       // The seat owns its retained bridge; individual turns must not close it.
@@ -3894,6 +3924,13 @@ export class CodexRuntime {
         }
         signal.throwIfAborted();
         request.accepted?.();
+        // A folder assigned since it was admitted can differ from where
+        // its thread works, which its Canvas states the rule from.
+        if (active.elsewhere !== undefined && request.projectAt) {
+          const placed = request.projectAt(active.elsewhere);
+          if (placed) request.project = placed;
+          else delete request.project;
+        }
         if (settings.scope === "community")
           request.project =
             [

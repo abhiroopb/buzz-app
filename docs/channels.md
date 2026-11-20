@@ -36,7 +36,10 @@ Normal and modified clicks are unchanged. In Messages, `buzz://` message links
 expose **Open link** and **Copy link** the same ways. **Open link** opens the
 linked thread as a tab in the current channel's workspace without navigating;
 another channel's thread uses the side pane. When that channel isn't readable
-there, it opens as a click would. Other internal `buzz://` links and links outside
+there, it opens as a click would. When the linked channel is withheld from the
+reader, the link, its preview card and **Open link** don't open anything, while
+**Copy link** and selection copy keep the URL; the link opens again once a recheck
+admits the reader. Other internal `buzz://` links and links outside
 message content retain their existing behavior. Copy failures show a dismissible
 notice and can be retried from the link menu.
 
@@ -186,9 +189,10 @@ Filtered sections with no visible channels show only their header, retaining the
 The currently open channel remains visible in its section regardless of its filter,
 however it was opened. Navigating away removes that exception. When a filter hides
 channels, the **Filter** submenu appends those eligible channels below its three
-options and a separator, in the existing section order; choosing one opens
-the section and channel without changing the filter. Choices reuse the sidebar's
-channel-type icons, unread emphasis, attention/thread dots and working-agent
+options and a separator, in the existing section order. Choosing a Solo chat
+opens the chat and preserves the section's disclosure. Choosing another channel
+opens both the section and channel. The filter stays in place. Choices reuse
+the sidebar's channel-type icons, unread emphasis, attention/thread dots and working-agent
 indicators. The temporarily visible open channel is excluded. Empty filtered sections retain
 their header and menu so the filter can be changed or a hidden row opened.
 Read-only hosts disable the filter choices while keeping hidden-channel navigation available. The saved-groups
@@ -889,7 +893,10 @@ preserved while private; explicitly choosing Public or View only selects the
 corresponding admission default without a metadata migration.
 
 Readers see General access as plain text from verified channel discovery metadata,
-without calling the editing capability. Guests and readers of Guest-default channels
+without calling the editing capability. Owners and admins see the editable policy
+from the live channel summary the same way, with no read when the dialog opens;
+choosing a change reads fresh signed details before the confirmation, and saving
+verifies their version. Guests and readers of Guest-default channels
 see “Viewing only. Ask an owner or admin to participate.” A nonmember previewing a
 Member-default channel instead sees “New people can participate. People already in
 the channel keep their access.” Other previews identify defaults that could not be
