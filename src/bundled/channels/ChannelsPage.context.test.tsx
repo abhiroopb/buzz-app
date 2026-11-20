@@ -562,10 +562,15 @@ function linkVisit(
   messageId: string,
   positions = new Map<string, JsonValue>(),
   resolved: OpenTarget[] = [],
+  threadRootId?: string,
 ) {
   return (entryId: string, traversal = false) => {
     const base = h.visit(
-      h.target("alpha", { messageId, draft: "Draft from a link" }),
+      h.target("alpha", {
+        messageId,
+        ...(threadRootId ? { threadRootId } : {}),
+        draft: "Draft from a link",
+      }),
       entryId,
       traversal,
     );
@@ -618,17 +623,26 @@ it("fills the empty reply composer a message link opens, once per visit", async 
   expect(composerText()).not.toContain("Draft from a link");
 });
 
-it("files a reply link's draft under the thread's resolved root", async () => {
-  const h = await channelsPage({ writable: true });
-  h.go(linkVisit(h, fixture.reply.id)("linked"));
-  await vi.waitFor(() => expect(composerText()).toContain("Draft from a link"));
-  expect(
-    readView(draftScope(), `draft:alpha:thread:${fixture.root.id}`, ""),
-  ).toBe("Draft from a link");
-  expect(
-    readView(draftScope(), `draft:alpha:thread:${fixture.reply.id}`, null),
-  ).toBeNull();
-});
+it.each([
+  ["without", false],
+  ["with", true],
+])(
+  "files a reply link's draft %s `thread` under the thread's root",
+  async (_name, named) => {
+    const h = await channelsPage({ writable: true });
+    const root = named ? fixture.root.id : undefined;
+    h.go(linkVisit(h, fixture.reply.id, undefined, undefined, root)("linked"));
+    await vi.waitFor(() =>
+      expect(composerText()).toContain("Draft from a link"),
+    );
+    expect(
+      readView(draftScope(), `draft:alpha:thread:${fixture.root.id}`, ""),
+    ).toBe("Draft from a link");
+    expect(
+      readView(draftScope(), `draft:alpha:thread:${fixture.reply.id}`, null),
+    ).toBeNull();
+  },
+);
 
 it("never replaces a draft someone already wrote", async () => {
   const h = await channelsPage({ writable: true });

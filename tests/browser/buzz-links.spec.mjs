@@ -885,7 +885,7 @@ test("a message link's draft fills an empty reply composer once and is never sen
     kind: "conversation",
     channelId: "alpha",
     messageId: target.id,
-    draft: "Ship it?\n@team",
+    draft: "Ship it?\n<b>x</b> **y** @team",
     scope: { viewer: app.viewer, communityOrigin: "https://primary.example" },
   });
   const thread = page.getByRole("complementary", {
@@ -896,7 +896,9 @@ test("a message link's draft fills an empty reply composer once and is never sen
     name: "Reply to thread",
     exact: true,
   });
-  await expect(editor).toHaveText("Ship it?\n@team");
+  await expect(editor).toHaveText("Ship it?\n<b>x</b> **y** @team");
+  // Markup and names stay literal text.
+  await expect(editor.locator("b, strong, a, [data-mention]")).toHaveCount(0);
   await expect.poll(async () => (await state(page)).status).toBe("opened");
   const { entry } = await state(page);
   expect(entry.target).not.toHaveProperty("draft");
