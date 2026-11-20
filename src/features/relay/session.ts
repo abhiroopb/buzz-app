@@ -3099,6 +3099,7 @@ export function createRelaySession(
       options?: {
         exact?: boolean;
         priority?: Priority;
+        subthread?: boolean;
         /** A person reads this view: see createThreadView's `recover`. */
         reading?: boolean;
       },
@@ -3158,6 +3159,7 @@ export function createRelaySession(
         targetReader,
         admitTarget: (events) => accept(events, false),
         exact: options?.exact ?? false,
+        subthread: options?.subthread ?? false,
         priority: options?.priority,
         admit: options?.exact ? (events) => accept(events, false) : undefined,
         seed,
