@@ -636,6 +636,8 @@ export const subscribeRoute = (key: AgentKey, listener: () => void) =>
   gatewayRoutes.subscribeRoute(key, listener);
 export const invalidateRoute = (key: AgentKey, revision?: number) =>
   gatewayRoutes.invalidate(key, revision);
+export const excludesHarness = (harness: string) =>
+  gatewayRoutes.excludes(harness);
 /** This build's upstream base for `harness`, for work outside a delivery
  * such as model discovery; a delivery carries its own as
  * `gateway.upstream`. */

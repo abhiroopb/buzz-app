@@ -1184,7 +1184,11 @@ Buzz sends the gateway nothing, not even the access check, and every agent
 keeps its own configuration with no notice. Otherwise the access check still
 decides whether a route is eligible, including 401/403 refusals. With no plugin calling it once every
 plugin has started, the access check's list stands. Only the first plugin to
-call it in a launch is asked; later calls only log.
+call it in a launch is asked; later calls only log. A conversation whose
+saved session ran through the gateway still compacts through it when a
+non-empty list leaves its harness out, while its route is eligible; an
+empty list sends the gateway nothing, so such a conversation can't compact
+until a launch's list is non-empty.
 
 Bundled plugins also get the building blocks to move agents onto
 Automatic themselves, with their own rules and wording. Each throws for any

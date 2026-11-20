@@ -3683,6 +3683,65 @@ describe("goose turns through the agent gateway", () => {
     }
   });
 
+  it("keeps compacting a forwarded conversation through the gateway once a plugin's list leaves goose out", async () => {
+    let route: GatewayRoute = enabled;
+    let excluded = false;
+    const g = gateway();
+    const forwarding = new GatewayForwarding(
+      { id: "buzz.goose", revision: "r1" },
+      { upstream: "goose", native: "goose" },
+      async () => ({ lists: ["", ""], proxied: false }),
+      g.native,
+      {
+        routeFor: () => route,
+        subscribeRoute: () => () => {},
+        excludes: (harness) => excluded && harness === "goose",
+      },
+    );
+    const f = setup({
+      forwarding,
+      provider: "databricks",
+      reply: "Compaction complete",
+    });
+    const config = { ...DEFAULT_CONFIG, provider: "databricks" };
+    const agent = { ...f.agent, config } as unknown as Agent;
+    const place = { channelId: channel, root: root.id };
+    try {
+      await f.deliver(root, dispatched());
+      await vi.waitFor(() => expect(g.calls).toContain("close 1"));
+      // The gateway's own list leaving goose out, with no plugin's: as before.
+      route = { ...enabled, harnesses: ["codex"] };
+      await expect(f.runtime.session(agent, place, "compact")).rejects.toThrow(
+        "which this agent's turns don't use now",
+      );
+      expect(g.opens).toHaveLength(1);
+      // A plugin's list leaving it out: the saved session keeps its gateway.
+      excluded = true;
+      await f.runtime.session(agent, place, "compact");
+      const compacting = f.fake.geese[1];
+      expect(compacting?.loaded).toEqual(["session-1"]);
+      expect(compacting?.turns.map((turn) => turn.text)).toEqual(["/compact"]);
+      expect(g.opens).toHaveLength(2);
+      expect(g.opens[1]?.inference[headers.launcher_session]).toBe(
+        g.opens[0]?.inference[headers.launcher_session],
+      );
+      // The gateway refusing still fails, as it does for a listed harness.
+      route = {
+        kind: "blocked",
+        revision: 3,
+        gatewayOrigin: "https://gateway.example",
+        reason: "auth",
+        message: "Gateway auth",
+      };
+      await expect(f.runtime.session(agent, place, "compact")).rejects.toThrow(
+        "Gateway auth",
+      );
+      expect(g.opens).toHaveLength(2);
+    } finally {
+      f.runtime.dispose();
+    }
+  });
+
   it("stops a forwarded turn on interrupt, posting nothing", async () => {
     const g = gateway();
     const f = setup({
