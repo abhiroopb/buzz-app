@@ -174,6 +174,64 @@ export function RegionChannelGroup(props: SoloChannelGroupProps) {
     () => teamRows?.claim(props.channelId, owner),
     [teamRows, props.channelId, owner],
   );
+  const portalSlot =
+    teamRows && (!teamRow?.owner || teamRow.owner === owner)
+      ? teamRow?.slot
+      : undefined;
+  // The disclosure and New task leave with the group: return focus to its row.
+  // A move to the region removes them before this cleanup runs, so track focus.
+  const slotFocus = useRef<{ destination: boolean }>(undefined);
+  useLayoutEffect(() => {
+    if (!portalSlot) return;
+    const channelId = props.channelId;
+    const enter = (event: FocusEvent) => {
+      const target = event.target;
+      slotFocus.current =
+        target instanceof Element
+          ? { destination: !!target.closest("[data-solo-destination-root]") }
+          : undefined;
+    };
+    const leave = (event: FocusEvent) => {
+      const next = event.relatedTarget;
+      if (next instanceof Node && portalSlot.contains(next)) return;
+      if (next) slotFocus.current = undefined;
+      // Focus moved to the page, not out with a removed control.
+      else if (event.target instanceof Node) {
+        const target = event.target;
+        queueMicrotask(() => {
+          if (target.isConnected) slotFocus.current = undefined;
+        });
+      }
+    };
+    portalSlot.addEventListener("focusin", enter);
+    portalSlot.addEventListener("focusout", leave);
+    return () => {
+      portalSlot.removeEventListener("focusin", enter);
+      portalSlot.removeEventListener("focusout", leave);
+      const focus = slotFocus.current;
+      slotFocus.current = undefined;
+      const focused = document.activeElement;
+      const held = focused && portalSlot.contains(focused);
+      if (!focus || (!held && focused !== document.body)) return;
+      // Destinations restore their own same-row/neighbor focus.
+      if (focus.destination) return;
+      queueMicrotask(() => {
+        const current = document.activeElement;
+        if (current !== document.body && !portalSlot.contains(current)) return;
+        const candidates = [
+          document.querySelector<HTMLElement>(
+            `button[data-channel-id="${CSS.escape(channelId)}"]`,
+          ),
+          document.querySelector<HTMLElement>("[data-solo-heading]"),
+        ];
+        for (const candidate of candidates) {
+          if (!candidate || candidate.closest("[hidden], [inert]")) continue;
+          candidate.focus();
+          if (document.activeElement === candidate) break;
+        }
+      });
+    };
+  }, [portalSlot, props.channelId]);
   if (!context || !shown || !channel) return null;
   const { session, navigator, scope, active } = context;
   const current = () =>
@@ -235,7 +293,7 @@ export function RegionChannelGroup(props: SoloChannelGroupProps) {
   );
   // A second group asking for the same row renders in place.
   if (teamRows && (!teamRow?.owner || teamRow.owner === owner))
-    return teamRow?.slot
+    return portalSlot
       ? createPortal(
           <>
             {disclosure}
@@ -247,7 +305,7 @@ export function RegionChannelGroup(props: SoloChannelGroupProps) {
               {body}
             </div>
           </>,
-          teamRow.slot,
+          portalSlot,
         )
       : null;
   const Icon = channelIcon(channel);

@@ -896,9 +896,11 @@ it("shows a region channel group with its Team row", async () => {
     "ready",
   );
   const create = vi.fn();
+  let move: (() => void) | undefined;
   function Body({ ui }: SoloRegionProps) {
     const [expanded, setExpanded] = useState(true);
     const [inline, setInline] = useState(true);
+    move = () => setInline((value) => !value);
     const Group = ui.ChannelGroup;
     if (!Group) return null;
     return (
@@ -1002,6 +1004,15 @@ it("shows a region channel group with its Team row", async () => {
     expect(group()).toContainElement(
       screen.getByRole("textbox", { name: "Task draft" }),
     );
+
+    // Focus in the group's controls returns to the row when they leave it.
+    for (const name of ["Toggle Source tasks", "New task in Source"]) {
+      screen.getByRole("button", { name }).focus();
+      await act(() => move?.());
+      await waitFor(() => expect(row()).toHaveFocus());
+      await act(() => move?.());
+      expect(group()).toContainElement(row() as HTMLElement);
+    }
 
     // The wrapped row is still the channel's own row.
     await user.click(row() as HTMLElement);
