@@ -420,6 +420,13 @@ Object.assign(window, {
     publications,
     ownerMention: (rootId: string | null) =>
       owner.session.ownerMentions?.latest({ channelId: "c", rootId }),
+    confirmedOwnerSends: (rootId: string, eventIds: readonly string[]) =>
+      owner.session.ownerMentions?.confirmedOwnerSends(
+        { channelId: "c", rootId },
+        eventIds,
+      ),
+    programmaticOwnerSend: (rootId: string, text: string) =>
+      owner.session.messages.reply("c", rootId, text),
     replaceRecipients: (people: readonly { pubkey: string; name: string }[]) =>
       replaceRecipients(people),
     disabledCalls,

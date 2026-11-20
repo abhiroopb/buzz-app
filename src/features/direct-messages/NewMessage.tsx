@@ -377,7 +377,7 @@ export function NewMessage({
   async function send(
     draft: MentionDraft,
     files?: AttachmentDraft,
-    explicitRecipientIds: readonly string[] = [],
+    explicitRecipientIds?: readonly string[],
   ) {
     const content = composerMarkdown(draft);
     if (

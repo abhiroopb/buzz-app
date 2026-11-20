@@ -237,6 +237,28 @@ it("advances owner mention evidence A to B to A only on confirmed human sends in
     ),
   ).toEqual(new Set([a]));
 
+  const plain = sendWithOwnerMentions(h.session, [], () =>
+    messages.send("c", "An ordinary owner update"),
+  );
+  const candidates = [automation, plain, inherited, a];
+  await vi.waitFor(() =>
+    expect(ownerMentions.confirmedOwnerSends(channel, candidates)).toEqual([
+      plain,
+      a,
+    ]),
+  );
+  expect(ownerMentions.confirmedOwnerSends(thread, candidates)).toEqual([]);
+  expect(
+    ownerMentions.confirmedOwnerSends(
+      { channelId: "c", rootId: plain },
+      candidates,
+    ),
+  ).toEqual([plain]);
+  expect(
+    ownerMentions.confirmedOwnerSends(channel, Array(129).fill(plain)),
+  ).toEqual([]);
+  expect(ownerMentions.latest(channel)?.eventId).toBe(a);
+
   const b = sendWithOwnerMentions(h.session, [namesake.pubkey], () =>
     messages.send("c", "@Namesake second", [namesake.pubkey]),
   );
@@ -357,8 +379,21 @@ it("keeps a confirmed owner mention through session replacement and ignores olde
     interrupted,
   );
   await vi.waitFor(() => expect(observed).toHaveReturnedWith(interrupted));
+  expect(
+    second.session.ownerMentions?.confirmedOwnerSends(source, [
+      explicit,
+      automatic,
+      interrupted,
+    ]),
+  ).toEqual([explicit, interrupted]);
   await second.members([honey.pubkey], 1700000001, relay, dm);
   expect(second.session.ownerMentions?.latest(source)).toBeNull();
+  expect(
+    second.session.ownerMentions?.confirmedOwnerSends(source, [
+      explicit,
+      interrupted,
+    ]),
+  ).toEqual([]);
 });
 
 it.each([false, true])(

@@ -59,7 +59,7 @@ export function followUpMessage(
         );
       return sendWithOwnerMentions(
         session,
-        message.explicitRecipientIds ?? [],
+        message.explicitRecipientIds,
         () => {
           if (message.forward) {
             if (!source)

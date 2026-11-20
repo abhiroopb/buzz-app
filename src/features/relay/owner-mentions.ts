@@ -10,6 +10,7 @@ type Evidence = Readonly<{
   recipientIds: readonly string[];
 }>;
 const MAX_CANDIDATES = 128;
+const MAX_RETAINED = 4096;
 const inOrder = (a: Evidence, b: Evidence) =>
   a.createdAtMs - b.createdAtMs || a.eventId.localeCompare(b.eventId);
 
@@ -25,11 +26,11 @@ const capture = new WeakMap<
 /** Only the human composer calls this. Raw send methods carry no provenance. */
 export function sendWithOwnerMentions<T extends string | Promise<string>>(
   sender: { outbox?: Pick<Outbox, "snapshot"> | undefined; messages: object },
-  recipients: readonly string[],
+  recipients: readonly string[] | undefined,
   send: () => T,
 ): T {
   const owner = sender.outbox && capture.get(sender.outbox);
-  if (!owner?.ownsMessages(sender.messages) || !recipients.length)
+  if (!owner?.ownsMessages(sender.messages) || recipients === undefined)
     return send();
   const events: EventData[] = [];
   const stop = owner.outbox.observeSend((candidate) => {
@@ -50,6 +51,7 @@ export function sendWithOwnerMentions<T extends string | Promise<string>>(
 export function createOwnerMentionStore(viewer: string) {
   const pending = new Map<string, Evidence>();
   const latest = new Map<string, Evidence>();
+  const confirmed = new Map<string, Source>();
   const listeners = new Set<() => void>();
   const key = ({ channelId, rootId }: Source, recipientId?: string) =>
     JSON.stringify([channelId, rootId, recipientId]);
@@ -92,7 +94,6 @@ export function createOwnerMentionStore(viewer: string) {
           const recipientIds = [...new Set(recipients)].filter((id) =>
             tagged.has(id),
           );
-          if (!recipientIds.length) return;
           put(
             pending,
             event.id,
@@ -119,6 +120,27 @@ export function createOwnerMentionStore(viewer: string) {
       );
       return Object.freeze({
         version: 1 as const,
+        confirmedOwnerSends(
+          source: Source,
+          eventIds: readonly string[],
+        ): readonly string[] {
+          if (
+            eventIds.length > MAX_CANDIDATES ||
+            signal.aborted ||
+            !canRead(source.channelId)
+          )
+            return [];
+          return Object.freeze(
+            eventIds.filter((id) => {
+              const receipt = confirmed.get(id);
+              return (
+                receipt?.channelId === source.channelId &&
+                (receipt.rootId === source.rootId ||
+                  (receipt.rootId === null && id === source.rootId))
+              );
+            }),
+          );
+        },
         latest(source: Source, eligibleRecipientIds?: readonly string[]) {
           if (signal.aborted || !canRead(source.channelId)) return null;
           if (eligibleRecipientIds === undefined)
@@ -156,25 +178,29 @@ export function createOwnerMentionStore(viewer: string) {
       const channelId = event.tags.find(([name]) => name === "h")?.[1];
       if (!channelId || !canRead(channelId)) return;
       pending.delete(event.id);
-      const thread = threadReference(event);
+      const root = threadReference(event)?.parentId ?? null;
+      put(confirmed, event.id, { channelId, rootId: root }, MAX_RETAINED);
+      if (!evidence.recipientIds.length) {
+        changed();
+        return;
+      }
       // A nested reply updates its selected branch. A top-level send also
       // starts the thread whose root is the message itself.
-      const roots = thread ? [thread.parentId] : [null, event.id];
-      let advanced = false;
+      const roots = root ? [root] : [null, event.id];
       for (const rootId of roots) {
         for (const recipientId of [undefined, ...evidence.recipientIds]) {
           const address = key({ channelId, rootId }, recipientId);
           const previous = latest.get(address);
           if (previous && inOrder(previous, evidence) >= 0) continue;
-          put(latest, address, evidence, 4096);
-          advanced = true;
+          put(latest, address, evidence, MAX_RETAINED);
         }
       }
-      if (advanced) changed();
+      changed();
     },
     clear() {
       pending.clear();
       latest.clear();
+      confirmed.clear();
       changed();
     },
   };

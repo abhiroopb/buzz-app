@@ -2855,7 +2855,7 @@ function Composer({
         ? captured.recipients
             .filter((person) => person.explicit)
             .map((person) => person.pubkey)
-        : [];
+        : undefined;
     const capturedRecipients = routing ? recipientsNow : captured.recipients;
     const capturedAttachments = attachments.store.snapshot();
     // Mention resolution can update recipients before their picker commits.
@@ -2952,7 +2952,7 @@ function Composer({
           ownSoloConversation ? capturedRunPicks : undefined,
           ownSoloConversation ? capturedPicks : undefined,
           ownSoloConversation ? capturedPicksRevision : undefined,
-          ...(explicit.length ? [explicit] : []),
+          ...(explicit ? [explicit] : []),
         );
         return;
       }
@@ -3065,7 +3065,7 @@ function Composer({
         threadRootId && mediaTimeSeconds !== undefined
           ? mediaTimeReply(mediaTimeSeconds, composerMarkdown(captured))
           : composerMarkdown(captured);
-      const explicitRecipientIds = explicit.filter((id) =>
+      const explicitRecipientIds = explicit?.filter((id) =>
         recipients.includes(id),
       );
       // Alone with agents, the toolbar keeps the agents; the next draft starts empty.
@@ -3226,7 +3226,7 @@ function Composer({
           attachments: uploaded,
           references,
           picks: sentPicks,
-          ...(explicitRecipientIds.length ? { explicitRecipientIds } : {}),
+          ...(explicitRecipientIds ? { explicitRecipientIds } : {}),
           ...(tokens.length ? { tokens } : {}),
         };
         const send = followUpMessage(

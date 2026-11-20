@@ -2920,10 +2920,16 @@ latest retained mention of any of them. This also limits the returned
 Subscribe once with `subscribe(listener)` and reread `latest` before using a
 result from asynchronous work. Bind to the current session on reconnect.
 
+Call `confirmedOwnerSends({ channelId, rootId }, eventIds)` with up to 128
+candidate message IDs from the same conversation. It returns confirmed human
+owner IDs in input order, including messages without explicit mentions. The
+host retains up to 4,096 confirmed IDs per viewer and community. An empty result
+means there is no positive proof for the candidates.
+
 The host records evidence from a human Send with explicit editor selections,
 then exposes it after relay acknowledgement or verified history readback.
-Automatic recipients, older messages, and raw writes have unknown provenance.
-They leave the last confirmed result in place. The bounded index is local to the
+Automatic recipients leave the last explicit mention in place. Older messages
+and raw writes have unknown owner provenance. The bounded index is local to the
 running app and its viewer and community. It survives reconnect and session
 replacement. `null` means evidence or access is unavailable. This reader
 performs no relay queries and returns no message text.

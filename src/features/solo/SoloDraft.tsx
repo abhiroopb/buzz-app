@@ -378,7 +378,7 @@ export function SoloDraft({
     picks?: MentionPicks,
     draftPicks?: DraftPicks,
     draftPicksRevision?: string | null,
-    explicitRecipientIds: readonly string[] = [],
+    explicitRecipientIds?: readonly string[],
   ) {
     const text = composerMarkdown(draft);
     if (submitting.current || !text.trim() || !available) return;
@@ -604,7 +604,7 @@ export function SoloDraft({
         signMessageTokens(draftTokens(draft), () =>
           sendWithOwnerMentions(
             session,
-            explicitRecipientIds.filter((id) => recipients.includes(id)),
+            explicitRecipientIds?.filter((id) => recipients.includes(id)),
             () =>
               references.length || Object.keys(firstPicks).length
                 ? session.messages.send(

@@ -542,6 +542,48 @@ test("actual composer selects namesakes by exact key, publishes channel/reply ta
       () => window.mentionFixture.ownerMention("a".repeat(64))?.eventId,
     ),
   ).toBe(afterRemoval.id);
+  const threadRoot = "a".repeat(64);
+  const ordinary = page.getByRole("textbox", { name: "Reply to thread" });
+  await ordinary.fill("An ordinary owner update");
+  await ordinary.press("Enter");
+  await expect
+    .poll(() => page.evaluate(() => window.mentionFixture.publications.length))
+    .toBe(5);
+  const human = await page.evaluate(() =>
+    window.mentionFixture.publications.at(-1),
+  );
+  expect(human.tags.filter(([name]) => name === "p")).toEqual([]);
+  const programmatic = await page.evaluate(
+    (root) =>
+      window.mentionFixture.programmaticOwnerSend(
+        root,
+        "An ordinary owner update",
+      ),
+    threadRoot,
+  );
+  await expect
+    .poll(() =>
+      page.evaluate(
+        (id) => window.mentionFixture.publications.some((row) => row.id === id),
+        programmatic,
+      ),
+    )
+    .toBe(true);
+  expect(
+    await page.evaluate(
+      (id) =>
+        window.mentionFixture.publications.find((row) => row.id === id)?.pubkey,
+      programmatic,
+    ),
+  ).toBe(human.pubkey);
+  await expect
+    .poll(() =>
+      page.evaluate(
+        ({ root, ids }) => window.mentionFixture.confirmedOwnerSends(root, ids),
+        { root: threadRoot, ids: [programmatic, human.id] },
+      ),
+    )
+    .toEqual([human.id]);
   expect(errors.unexplained()).toEqual([]);
 });
 
