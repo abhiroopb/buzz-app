@@ -443,29 +443,27 @@ export async function readFile(
   let error = "";
   let large = false;
   let child: Awaited<ReturnType<Spawn>> | undefined;
-  let timer: ReturnType<typeof setTimeout> | undefined;
+  child = await spawn(process, {
+    args: [path, ...args],
+    cwd,
+    ...(protection ? { protection: structuredClone(protection) } : {}),
+    onStdout: (data) => {
+      output += data;
+      if (output.length > (READ_LIMIT / 3) * 4 + 1024 && !large) {
+        large = true;
+        void child?.kill();
+      }
+    },
+    onStderr: (data) => {
+      error += data;
+    },
+  });
   const abort = () => void child?.kill();
-  // Keep composite cancellation active while the child is still starting.
   signal?.addEventListener("abort", abort, { once: true });
+  if (large || signal?.aborted) abort();
+  const timer = setTimeout(() => void child?.kill(), READ_TIMEOUT_MS);
   let code: number | null;
   try {
-    child = await spawn(process, {
-      args: [path, ...args],
-      cwd,
-      ...(protection ? { protection: structuredClone(protection) } : {}),
-      onStdout: (data) => {
-        output += data;
-        if (output.length > (READ_LIMIT / 3) * 4 + 1024 && !large) {
-          large = true;
-          abort();
-        }
-      },
-      onStderr: (data) => {
-        error += data;
-      },
-    });
-    if (large || signal?.aborted) abort();
-    timer = setTimeout(abort, READ_TIMEOUT_MS);
     code = await child.exited;
   } finally {
     clearTimeout(timer);
