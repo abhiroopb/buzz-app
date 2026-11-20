@@ -2964,6 +2964,10 @@
     margin: 0;
     padding-inline: var(--space-4);
     --accordion-row-gutter: min(var(--accordion-row-inset), var(--space-half));
+    --accordion-popout-outset: calc(
+      var(--accordion-row-gutter) +
+      var(--space-4)
+    );
     --accordion-row-padding: calc(
       var(--accordion-row-inset) -
       var(--accordion-row-gutter)
@@ -3009,14 +3013,17 @@
     }
 
     > .buzz-accordion-item[data-open]::before {
-      inset-inline: calc(0px - var(--accordion-row-gutter) - var(--space-4));
+      inset-inline: calc(0px - var(--accordion-popout-outset));
       opacity: 1;
     }
 
     > :where(.buzz-accordion-item) > :where(.buzz-accordion-panel) {
+      /* The body uses the card width, including during its height transition. */
+      margin-inline: calc(0px - var(--accordion-popout-outset));
+
       > .buzz-accordion-content,
       > div > .buzz-accordion-content {
-        padding-inline: var(--accordion-row-padding);
+        padding-inline: max(var(--accordion-row-padding), var(--space-2));
         padding-block-end: var(--space-4);
       }
     }

@@ -2730,7 +2730,7 @@ export const COMPONENT_SPECIMENS: Record<string, () => ReactNode> = {
         value: "Publishing",
         title: "Publishing",
         content: (
-          <div className="grid gap-3">
+          <div className="grid grid-cols-1 gap-3">
             <div className="rounded-row border border-standard p-2">
               <section
                 aria-label="Publishing instructions"
@@ -2740,8 +2740,10 @@ export const COMPONENT_SPECIMENS: Record<string, () => ReactNode> = {
                 <p>Publishing instructions go here.</p>
               </section>
             </div>
-            <div>
-              <Button size="sm" variant="outline">Restore default</Button>
+            <div className="[&>button]:max-w-full">
+              <Button size="sm" variant="outline">
+                <span className="whitespace-normal">Restore default</span>
+              </Button>
             </div>
           </div>
         ),
@@ -2772,7 +2774,7 @@ export const COMPONENT_SPECIMENS: Record<string, () => ReactNode> = {
                 title: "Publishing",
                 triggerDescription: "Default instructions",
                 content: (
-                  <div className="grid min-w-0 gap-3">
+                  <div className="grid grid-cols-1 gap-3">
                     <div className="rounded-row border border-standard p-2">
                       <section
                         aria-label="Publishing instructions"
@@ -2813,9 +2815,11 @@ export const COMPONENT_SPECIMENS: Record<string, () => ReactNode> = {
                         </p>
                       </section>
                     </div>
-                    <div>
+                    <div className="[&>button]:max-w-full">
                       <Button size="sm" variant="outline">
-                        Restore default
+                        <span className="whitespace-normal">
+                          Restore default
+                        </span>
                       </Button>
                     </div>
                   </div>

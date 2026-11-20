@@ -132,6 +132,8 @@ test("expanded Settings cards own adjacent borders and support caller-owned scro
   const readingArea = card.getByRole("region", {
     name: "Publishing instructions",
   });
+  const standard = notes.getByRole("button", { name: "Working notes" });
+  const readingWidth = (await readingArea.boundingBox())?.width ?? 0;
   await page.keyboard.press("Tab");
   await expect(readingArea).toBeFocused();
   await page.keyboard.press("End");
@@ -148,9 +150,34 @@ test("expanded Settings cards own adjacent borders and support caller-owned scro
   await expect.poll(() => cardStyle("opacity")).toBe("0");
   await expect.poll(async () => (await divider(notes)).visible).toBe(true);
 
-  const standard = notes.getByRole("button", { name: "Working notes" });
   await standard.click();
-  await expect(
-    notes.getByText("Keep decisions next to the work they affect."),
-  ).toBeVisible();
+  const standardContent = notes.getByText(
+    "Keep decisions next to the work they affect.",
+  );
+  await expect(standardContent).toBeVisible();
+  expect(readingWidth).toBeGreaterThan(
+    (await standardContent.boundingBox())?.width ?? Infinity,
+  );
+
+  await page.setViewportSize({ width: 320, height: 800 });
+  await page.locator("html").evaluate((root) => {
+    root.style.fontSize = "32px";
+  });
+  await publishing.press("Enter");
+  await expect(publishing).toHaveAttribute("aria-expanded", "true");
+  await expect
+    .poll(() =>
+      readingArea.evaluate((area) => {
+        const panel = area.closest(".buzz-accordion-panel");
+        if (!panel) return false;
+        const bounds = area.getBoundingClientRect();
+        const clip = panel.getBoundingClientRect();
+        return (
+          area.scrollWidth <= area.clientWidth &&
+          bounds.left >= Math.max(0, clip.left) &&
+          bounds.right <= Math.min(window.innerWidth, clip.right)
+        );
+      }),
+    )
+    .toBe(true);
 });
