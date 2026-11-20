@@ -65,6 +65,7 @@ import { Reading, readingPositioned } from "./use-reading";
 import { useMessageReveal } from "./use-message-reveal";
 import { usePendingRequest } from "./use-pending-request";
 import type { PageNavigation } from "../navigation/service";
+import { applyLinkDraft } from "./link-draft";
 import { messageViewKey } from "./view-key";
 import { useKnownAgentPubkeys } from "../agents/use-known";
 import { JumpToLatestButton } from "./JumpToLatestButton";
@@ -2206,6 +2207,12 @@ function ThreadMessages({
       (snapshot.root?.id === messageId && snapshot.targetStatus === "ready"))
       ? snapshot.root
       : undefined;
+  // A link's draft fills this reply composer once its root is known.
+  const composerRootId = composerRoot?.id;
+  useLayoutEffect(() => {
+    if (navigation && composerRootId)
+      applyLinkDraft(navigation, scope, channelId, composerRootId);
+  }, [navigation, scope, channelId, composerRootId]);
   const retryThread = () => {
     if (showOlderPageStatus) {
       if (scroller.current) captureOlderAnchor(scroller.current);
