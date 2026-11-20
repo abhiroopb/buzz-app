@@ -254,7 +254,9 @@ export function parseBuzzLink(href: string): BuzzLink | null {
     const channelId = url.searchParams.get("channel") ?? "";
     const messageId = url.searchParams.get("id") ?? "";
     const threadRootId = url.searchParams.get("thread");
-    const draft = url.searchParams.get("draft");
+    // Line breaks arrive as LF, CRLF or CR; the composer keeps LF.
+    const draft =
+      url.searchParams.get("draft")?.replace(/\r\n?/g, "\n") ?? null;
     if (
       !channelPattern.test(channelId) ||
       !eventPattern.test(messageId) ||

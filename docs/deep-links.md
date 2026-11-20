@@ -46,8 +46,9 @@ again (`identity/sign-in-requests.ts`). Unlike bare `buzz://`, it wins like any
 other latest link: when links arrive together and it is the last, it is the one
 acted on and the others do not open.
 
-A message link's optional `draft` is percent-encoded plain text, 1-2,000
-characters with line breaks and tabs but no other control characters. Opening the
+A message link's optional `draft` is percent-encoded plain text, 1-2,000 UTF-16
+code units with line breaks and tabs but no other control characters or
+bidirectional overrides; CRLF and CR become LF. Opening the
 link fills the reply composer of the thread it opens (the resolved root's thread)
 only when that composer has no saved draft, and never sends. The draft is applied
 once per visit and then leaves the visit's address. A repeated, blank, oversize or

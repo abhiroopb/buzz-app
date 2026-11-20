@@ -147,6 +147,8 @@ async function channelsPage({
   const { viewer, authority, reply, newer, channels } = fixture;
   const alpha = [...(root ? [fixture.root] : []), reply, ...newer];
   const held: ((error?: Error) => void)[] = [];
+  /** Signs and publishes the writable connection was asked for. */
+  const writes = { signed: 0, published: 0 };
   const transport: ReadTransport = {
     viewer: viewer.pubkey,
     relayAuthor: authority.pubkey,
@@ -154,8 +156,13 @@ async function channelsPage({
     ...(writable && {
       writer: {
         kinds: [9],
-        sign: async (template) => signed(viewer, template),
-        publish: async () => {},
+        sign: async (template) => {
+          writes.signed += 1;
+          return signed(viewer, template);
+        },
+        publish: async () => {
+          writes.published += 1;
+        },
       },
     }),
     query: async (filters) => {
@@ -290,6 +297,7 @@ async function channelsPage({
   return {
     session: owner.session,
     held,
+    writes,
     /** Open in channel from the thread's tab. */
     inChannel: (extra: Parameters<typeof target>[1] = {}) =>
       target("alpha", {
@@ -592,6 +600,8 @@ it("fills the empty reply composer a message link opens, once per visit", async 
   await vi.waitFor(() => expect(composerText()).toContain("Draft from a link"));
   expect(readView(draftScope(), key, "")).toBe("Draft from a link");
   // Nothing is sent, and the draft leaves the visit's address.
+  await act(flush);
+  expect(h.writes).toEqual({ signed: 0, published: 0 });
   expect(resolved.at(-1)).not.toHaveProperty("draft");
   expect(resolved.at(-1)).toMatchObject({
     channelId: "alpha",
