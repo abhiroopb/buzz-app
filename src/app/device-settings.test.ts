@@ -34,6 +34,7 @@ it("offers appearance and the message and agent preferences, and nothing else", 
       saved: true,
     },
     { key: "conversations.autocorrect", value: false, saved: true },
+    { key: "conversations.message_details", value: false, saved: true },
     { key: "agents.remember_mentioned", value: true, saved: true },
     { key: "search.unread_first", value: true, saved: true },
   ]);

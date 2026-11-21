@@ -25,6 +25,7 @@ import { MessageMarkdown } from "../messages/MessageMarkdown";
 import { useReferenceDirectory } from "../messages/ReferenceText";
 import { ConversationPresentation } from "./ConversationPresentation";
 import { LinkThreadTabContext } from "./LinkLabelContext";
+import { setMessageDetailsPreference } from "../messages/message-details-preference";
 
 afterEach(() => {
   cleanup();
@@ -58,6 +59,30 @@ it("keeps anchor destination and host semantics with and without presentation", 
   );
   expect(fallback).toContain(`>${url}</a>`);
   expect(fallback).not.toContain("data-link-renderer");
+});
+it("drops a raw web address's scheme only with more message details on", () => {
+  const view = render(
+    <MessageLink url={url} registry={undefined} onOpenLink={() => true} />,
+  );
+  expect(screen.getByRole("link")).toHaveTextContent(url);
+  act(() => setMessageDetailsPreference(true));
+  try {
+    const link = screen.getByRole("link");
+    expect(link).toHaveTextContent(/^example\.com\/path\?query=yes$/);
+    expect(link).toHaveAttribute("href", url);
+    view.rerender(
+      <MessageLink
+        url={url}
+        label="The docs"
+        registry={undefined}
+        onOpenLink={() => true}
+      />,
+    );
+    expect(screen.getByRole("link")).toHaveTextContent(/^The docs$/);
+  } finally {
+    act(() => setMessageDetailsPreference(false));
+    localStorage.removeItem("buzz-message-details.v1");
+  }
 });
 it("skips throwing and unmatched renderers and resolves by order, then key", () => {
   const broken = {

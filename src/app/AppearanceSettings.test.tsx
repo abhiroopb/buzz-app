@@ -13,6 +13,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import { ToastProvider } from "../shared/design-system/ui/Toast";
 import { createAppearance } from "../shared/theme/service";
 import { AppearanceSettings } from "./AppearanceSettings";
+import { messageDetailsPreference } from "../features/messages/message-details-preference";
 import {
   setUnreadFirstPreference,
   unreadFirstPreference,
@@ -631,6 +632,28 @@ it("leads search with unread until this device turns it off", async () => {
     );
   });
   expect(toggle()).toBeChecked();
+});
+
+it("shows more message details only once this device turns it on", async () => {
+  const user = userEvent.setup();
+  const appearance = createAppearance();
+  preferenceAppearances.push(appearance);
+  const toggle = () =>
+    screen.getByRole("switch", { name: "Show more message details" });
+  render(<AppearanceSettings appearance={appearance} />, {
+    wrapper: ToastProvider,
+  });
+  expect(toggle()).not.toBeChecked();
+  await user.click(toggle());
+  expect(messageDetailsPreference()).toBe(true);
+  expect(localStorage.getItem("buzz-message-details.v1")).toBe("on");
+  act(() => {
+    localStorage.setItem("buzz-message-details.v1", "off");
+    window.dispatchEvent(
+      new StorageEvent("storage", { key: "buzz-message-details.v1" }),
+    );
+  });
+  expect(toggle()).not.toBeChecked();
 });
 
 it("saves the message sort default, or keeps it active and retries when saving fails", async () => {

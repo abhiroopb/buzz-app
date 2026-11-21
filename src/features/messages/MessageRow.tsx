@@ -50,9 +50,11 @@ import {
 import { useChannelIdentityNames } from "../identity-names/react";
 import { Button } from "../../shared/design-system/ui/Button";
 import { ReplySummary } from "./ReplySummary";
+import { AttachmentGroupDetails } from "./AttachmentGroupDetails";
 import { usePresenceStatus } from "../presence/react";
 import { UserStatusDisplay } from "../user-status/StatusDisplay";
 import { useMessageDensity } from "../../shared/theme/message-density";
+import { useMessageDetails } from "./message-details-preference";
 import { useLocalDay } from "../../shared/use-local-day";
 import { IconButton } from "../../shared/design-system/ui/IconButton";
 import {
@@ -298,6 +300,7 @@ function MessageRowContent({
   const [avatarFocused, setAvatarFocused] = useState(false);
   // Compact is a flat list: everyone's rows start at the left, with no own surface.
   const flat = useMessageDensity() === "compact";
+  const details = useMessageDetails();
   const resolveName = useChannelIdentityNames(references, row.channelId);
   const directory = useReferenceDirectory(references, participantProfiles);
   const reactions = row.reactions;
@@ -965,10 +968,23 @@ function MessageRowContent({
                 />
               );
             });
+            const nameLine = details && (
+              <AttachmentGroupDetails
+                noun={files ? "files" : mediaLabel}
+                items={group.map((attachment) => {
+                  const url = safeMessageUrl(attachment.url);
+                  return {
+                    source: url ? attachmentMedia(url) : undefined,
+                    name: attachment.name,
+                  };
+                })}
+              />
+            );
             return images &&
               !(group[0] && drawn(group[0])) &&
               (imageOnly || group.length >= 4) ? (
               <div className={styles.imageGroup} key={group[0]?.url}>
+                {nameLine}
                 {/* biome-ignore lint/a11y/useSemanticElements: This labels related media links, not a fieldset of form controls. */}
                 <div
                   className={`${styles.imageList} ${group.length >= 4 ? styles.imageGrid : ""}`}
@@ -981,6 +997,7 @@ function MessageRowContent({
               </div>
             ) : files ? (
               <div className={styles.fileGroup} key={group[0]?.url}>
+                {nameLine}
                 {items}
               </div>
             ) : (
@@ -1348,7 +1365,7 @@ function MessageRowContent({
             type="button"
             aria-label={
               row.replyCount > 0
-                ? `View thread: ${row.replyCount} ${row.replyCount === 1 ? "reply" : "replies"}${unreadLabel ? `. ${unreadLabel}` : ""}${workingLabel ? `. ${workingLabel}` : ""}${activity ? `. ${activity.label}` : ""}${threadDraft ? ". Draft reply" : ""}`
+                ? `View thread: ${row.replyCount} ${row.replyCount === 1 ? "reply" : "replies"}${details && !activity && row.lastReplyAt !== undefined ? `. Last reply ${formatItemTimestamp(row.lastReplyAt)}` : ""}${unreadLabel ? `. ${unreadLabel}` : ""}${workingLabel ? `. ${workingLabel}` : ""}${activity ? `. ${activity.label}` : ""}${threadDraft ? ". Draft reply" : ""}`
                 : `View thread: ${[
                     ...(activity
                       ? [remainingWorkingLabel, activity.label]
@@ -1371,6 +1388,8 @@ function MessageRowContent({
               draft={threadDraft}
               replied={row.replyCount > 0}
               count={activity ? 0 : row.replyCount}
+              shown={details ? 5 : undefined}
+              lastReplyAt={details ? row.lastReplyAt : undefined}
               participants={row.participants}
               profiles={participantProfiles}
               agentPubkeys={agentPubkeys}

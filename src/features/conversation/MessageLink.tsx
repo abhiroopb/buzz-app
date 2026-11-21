@@ -1,3 +1,4 @@
+import { useMessageDetails } from "../messages/message-details-preference";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { useConversationPresentation } from "./ConversationPresentation";
 import {
@@ -246,6 +247,7 @@ export function MessageLink({
   if (!active && menuOpen) setMenuOpen(false);
   if (!active && notice) setNotice(undefined);
   const external = /^https?:\/\//i.test(url);
+  const details = useMessageDetails();
   const openThreadTab = useContext(LinkThreadTabContext);
   const thread =
     openThreadTab && destination?.messageId
@@ -335,7 +337,15 @@ export function MessageLink({
   };
   const anchor = (entry?: Contribution<LinkRenderer>) => {
     const Content = entry?.component;
-    const content = Content ? <Content url={url} /> : (shown ?? display ?? url);
+    const written = shown ?? display;
+    // A raw web address may read without its scheme; copy and the link keep it.
+    const content = Content ? (
+      <Content url={url} />
+    ) : details && external && (written === undefined || written === url) ? (
+      url.replace(/^https?:\/\//i, "")
+    ) : (
+      (written ?? url)
+    );
     // Selection copy reads the authored label; empty marks a raw destination.
     const element = interactive ? (
       <a

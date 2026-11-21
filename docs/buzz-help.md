@@ -1064,6 +1064,12 @@ Quitting Buzz also turns it off.
   follows the language and region. Show seconds adds seconds to clock times. **Message timestamps** can hide the
   time beside each message everywhere or only in Solo chats; day dividers and
   screen-reader dates remain.
+- **More message details**: **Settings → Appearance → Show more message
+  details** is off by default. On, thread summaries show up to five people and
+  when the last reply came, image and file groups show the file's name or the
+  count with **Download all** (desktop app), and raw web links leave out
+  `https://`. Copying a link keeps the full address. The choice applies on this
+  device only.
 - **Back and Forward**: after following a channel or message link to another
   channel, Back and Forward restore the thread tab you last selected in the
   channel you left.

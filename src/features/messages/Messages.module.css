@@ -590,6 +590,19 @@ html[data-keyboard-navigation] .authorLink:focus-visible {
   background: var(--reaction-surface, var(--affordance-reaction));
   color: var(--reaction-ink, var(--text-standard));
 }
+/* A group's own line, so it spans a wrapping file row. */
+.attachmentDetails {
+  display: flex;
+  flex-basis: 100%;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1h);
+  margin-bottom: var(--space-1);
+  color: var(--text-subtle);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption--line-height);
+  letter-spacing: var(--text-caption--letter-spacing);
+}
 .attachment {
   display: inline-block;
   padding: var(--space-1h) var(--space-2);
@@ -966,6 +979,10 @@ html[data-keyboard-navigation] .attachmentImage:focus-visible {
   flex-shrink: 0;
   border-radius: 50%;
   background: var(--text-standard);
+}
+.threadLastReply {
+  color: var(--text-subtle);
+  font-weight: normal;
 }
 .threadDraft {
   display: inline-flex;

@@ -48,6 +48,10 @@ import {
   useClockPreference,
 } from "../shared/clock-preference";
 import {
+  setMessageDetailsPreference,
+  useMessageDetailsPreference,
+} from "../features/messages/message-details-preference";
+import {
   setNamePreference,
   useNamePreference,
 } from "../features/profiles/name-preference";
@@ -83,6 +87,7 @@ export function AppearanceSettings({
   const followUp = useFollowUpBehaviorPreference();
   const autocorrect = useMessageAutocorrectPreference();
   const unreadFirst = useUnreadFirstPreference();
+  const messageDetails = useMessageDetailsPreference();
   const messageSort = useMessageSortPreference();
   const clock = useClockPreference();
   const names = useNamePreference();
@@ -404,6 +409,12 @@ export function AppearanceSettings({
                 />
               }
             />
+            <SwitchPreferenceRow
+              label="Show more message details"
+              description="Thread summaries show up to five people and when the last reply came. Attachments show their names, with Download all. Web links leave out https://."
+              checked={messageDetails.enabled}
+              onCheckedChange={setMessageDetailsPreference}
+            />
             {verifiedCommunity && (
               <PreferenceRow
                 title="Show people by"
@@ -589,6 +600,23 @@ export function AppearanceSettings({
             </Button>
           </ToastNotice>
         )}
+        {active && messageDetails.unsaved && (
+          <ToastNotice
+            title="Message details preference wasn’t saved"
+            description="This choice is active, but could not be saved on this device. Try again."
+          >
+            <Button
+              type="button"
+              size="sm"
+              onClick={() =>
+                setMessageDetailsPreference(messageDetails.enabled)
+              }
+            >
+              Retry saving message details preference
+            </Button>
+          </ToastNotice>
+        )}
+
         {active && messageSort.unsaved && (
           <ToastNotice
             title="Message sort preference wasn’t saved"

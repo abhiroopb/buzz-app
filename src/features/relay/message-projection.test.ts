@@ -343,3 +343,39 @@ it("refolds a relayed row when the named agent's verified owner changes", () => 
   owner = alice.pubkey;
   expect(view.reconcile([relayed], [])[0]?.relayedFrom?.verified).toBe(true);
 });
+
+it("reads the summary's last reply time, and a newer pending reply's", () => {
+  const summary = (last_reply_at: unknown) =>
+    signed(relay, {
+      kind: 39005,
+      created_at: 20,
+      tags: [
+        ["e", root.id],
+        ["d", root.id],
+        ["h", channel],
+      ],
+      content: JSON.stringify({
+        descendant_count: 1,
+        participants: [alice.pubkey],
+        last_reply_at,
+      }),
+    });
+  const last = (rows: ReturnType<MessageProjection["reconcile"]>) =>
+    rows.find((item) => item.id === root.id)?.lastReplyAt;
+  expect(last(projection().reconcile([root, summary(15)], []))).toBe(15);
+  expect(last(projection().reconcile([root, summary("15")], []))).toBe(
+    undefined,
+  );
+  expect(last(projection().reconcile([root, summary(1.5)], []))).toBe(
+    undefined,
+  );
+  const reply = message(bob, channel, "re", 30, [["e", root.id, "", "reply"]]);
+  expect(
+    last(
+      projection().reconcile(
+        [root, summary(15), reply],
+        [{ event: reply, delivery: "sending" }],
+      ),
+    ),
+  ).toBe(30);
+});

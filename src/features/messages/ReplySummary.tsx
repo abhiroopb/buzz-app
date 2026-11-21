@@ -4,6 +4,10 @@ import { PencilSimpleIcon } from "../../shared/design-system/icons/index";
 import type { Profile } from "../relay/contracts";
 import styles from "./Messages.module.css";
 import { avatarMedia } from "../../shared/avatar-source";
+import {
+  formatFullTimestamp,
+  formatItemTimestamp,
+} from "../../shared/datetime";
 
 const SHOWN_PARTICIPANTS = 3;
 
@@ -22,7 +26,13 @@ export function ReplySummary({
   hideEmptyLabel = false,
   draft = false,
   replied = count > 0,
+  shown = SHOWN_PARTICIPANTS,
+  lastReplyAt,
 }: {
+  /** How many participant avatars show before the overflow count. */
+  shown?: number | undefined;
+  /** Shown as "Last reply …" after the count, when given. */
+  lastReplyAt?: number | undefined;
   workingParticipants?: readonly string[];
   activity?: ReactNode;
   /** Activity-only triggers already have an accessible thread action label. */
@@ -46,15 +56,12 @@ export function ReplySummary({
   );
   // Later avatars overlap earlier ones, so the newest replier renders last:
   // on top, beside the count.
-  const stacked = [
-    ...newest.slice(0, SHOWN_PARTICIPANTS).reverse(),
-    ...newest.slice(SHOWN_PARTICIPANTS),
-  ];
+  const stacked = [...newest.slice(0, shown).reverse(), ...newest.slice(shown)];
   return (
     <>
       <AvatarStack
         size="small"
-        max={SHOWN_PARTICIPANTS}
+        max={shown}
         items={stacked.map((id) => {
           const profile = profiles?.get(id);
           return {
@@ -71,6 +78,15 @@ export function ReplySummary({
           {count > 0
             ? `${count} ${count === 1 ? "reply" : "replies"}`
             : "View thread"}
+        </span>
+      )}
+      {count > 0 && lastReplyAt !== undefined && (
+        <span
+          className={styles.threadLastReply}
+          data-thread-last-reply=""
+          title={formatFullTimestamp(lastReplyAt)}
+        >
+          Last reply {formatItemTimestamp(lastReplyAt)}
         </span>
       )}
       {unreadCount ? (
