@@ -18,6 +18,8 @@ export function AttachmentGroupDetails({
 }) {
   const [state, setState] = useState<State>("idle");
   const pending = useRef(false);
+  // Sources already saved, so a retry saves only the rest.
+  const saved = useRef(new Set<string>());
   useEffect(() => {
     if (state !== "saved" && state !== "failed") return;
     const timer = setTimeout(() => setState("idle"), 4000);
@@ -36,16 +38,21 @@ export function AttachmentGroupDetails({
     if (pending.current) return;
     pending.current = true;
     setState("pending");
-    try {
-      // One at a time, so each save names its own file.
-      for (const { source, name } of sources)
+    let failed = false;
+    // One at a time, so each save names its own file. A failure doesn't stop
+    // the rest.
+    for (const { source, name } of sources) {
+      if (saved.current.has(source)) continue;
+      try {
         await downloadNativeMedia(source, name);
-      setState("saved");
-    } catch {
-      setState("failed");
-    } finally {
-      pending.current = false;
+        saved.current.add(source);
+      } catch {
+        failed = true;
+      }
     }
+    pending.current = false;
+    if (!failed) saved.current.clear();
+    setState(failed ? "failed" : "saved");
   };
   return (
     <div className={styles.attachmentDetails} data-attachment-details="">

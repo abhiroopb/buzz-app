@@ -58,6 +58,7 @@ import { useMessageDetails } from "./message-details-preference";
 import { useLocalDay } from "../../shared/use-local-day";
 import { IconButton } from "../../shared/design-system/ui/IconButton";
 import {
+  Fragment,
   memo,
   useMemo,
   useId,
@@ -1000,6 +1001,11 @@ function MessageRowContent({
                 {nameLine}
                 {items}
               </div>
+            ) : nameLine && !(group[0] && drawn(group[0])) ? (
+              <Fragment key={group[0]?.url}>
+                {nameLine}
+                {items}
+              </Fragment>
             ) : (
               items
             );

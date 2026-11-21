@@ -50,6 +50,7 @@ import {
 import { ToastProvider } from "../../shared/design-system/ui/Toast";
 import { ConversationPresentation } from "../conversation/ConversationPresentation";
 import { MessageRow } from "./MessageRow";
+import { setMessageDetailsPreference } from "./message-details-preference";
 import { MessageContextMenus } from "./MessageActionBar";
 import { ReplySummary } from "./ReplySummary";
 import { setClockPreference } from "../../shared/clock-preference";
@@ -939,6 +940,42 @@ it.each([
     expect(html).toContain('loading="lazy"');
   },
 );
+
+it("names an image sent with text when more message details are on", () => {
+  const show = () => (
+    <MessageRow
+      row={{
+        ...row,
+        content: "Here is the plan",
+        attachments: [
+          {
+            url: "https://image.test/plan.png",
+            kind: "image",
+            name: "plan.png",
+          },
+        ],
+      }}
+      profile={undefined}
+      media={(url) => url}
+      onOpenLink={() => false}
+      day={false}
+      retry={undefined}
+    />
+  );
+  const view = renderDom(show());
+  try {
+    expect(
+      view.container.querySelector("[data-attachment-details]"),
+    ).toBeNull();
+    act(() => setMessageDetailsPreference(true));
+    expect(
+      view.container.querySelector("[data-attachment-details]"),
+    ).toHaveTextContent("plan.png");
+  } finally {
+    act(() => setMessageDetailsPreference(false));
+    view.unmount();
+  }
+});
 
 it("uses loaded image proportions without metadata and resets them when the source changes", async () => {
   const show = (url: string) => (

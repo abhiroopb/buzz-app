@@ -31,7 +31,7 @@ it("names a single attachment, and draws nothing without a name", () => {
   expect(view.container).toBeEmptyDOMElement();
 });
 
-it("downloads every attachment in order, and offers a retry when one fails", async () => {
+it("downloads every attachment in order, and retries only the ones that failed", async () => {
   const user = userEvent.setup();
   vi.mocked(downloadNativeMedia).mockResolvedValue(undefined);
   render(
@@ -52,14 +52,26 @@ it("downloads every attachment in order, and offers a retry when one fails", asy
   expect(await screen.findByRole("status")).toHaveTextContent(
     "Saved to Downloads",
   );
+  vi.mocked(downloadNativeMedia).mockClear();
   vi.mocked(downloadNativeMedia).mockRejectedValueOnce(new Error("denied"));
   await user.click(screen.getByRole("button", { name: "Download all" }));
   expect(await screen.findByRole("alert")).toHaveTextContent(
     "Couldn’t download all. Try again.",
   );
-  expect(
-    screen.getByRole("button", { name: "Retry download all" }),
-  ).toBeInTheDocument();
+  // The first save failed, and the second still ran.
+  expect(vi.mocked(downloadNativeMedia).mock.calls).toEqual([
+    ["native:a", "a.pdf"],
+    ["native:b", "b.pdf"],
+  ]);
+  vi.mocked(downloadNativeMedia).mockClear();
+  await user.click(screen.getByRole("button", { name: "Retry download all" }));
+  // The retry saves only the file that failed.
+  expect(vi.mocked(downloadNativeMedia).mock.calls).toEqual([
+    ["native:a", "a.pdf"],
+  ]);
+  expect(await screen.findByRole("status")).toHaveTextContent(
+    "Saved to Downloads",
+  );
 });
 
 it("offers Download all only when every attachment can be saved", () => {
