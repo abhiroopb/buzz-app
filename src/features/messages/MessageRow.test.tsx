@@ -3185,11 +3185,16 @@ it.each(["timeline", "thread", "continuation"] as const)(
       expect(
         container.querySelector("[data-viewer-message]"),
       ).toHaveTextContent("Root");
+      expect(container.querySelector("[data-viewer-author]")).toHaveTextContent(
+        "Root",
+      );
       rerender(<MessageRow {...props} viewer="someone-else" />);
       expect(container.querySelector("[data-own]")).toBeNull();
       expect(container.querySelector("[data-viewer-message]")).toBeNull();
+      expect(container.querySelector("[data-viewer-author]")).toBeNull();
       rerender(<MessageRow {...props} viewer={undefined} />);
       expect(container.querySelector("[data-viewer-message]")).toBeNull();
+      expect(container.querySelector("[data-viewer-author]")).toBeNull();
     } finally {
       cleanup();
     }
@@ -3220,6 +3225,10 @@ it.each(["timeline", "thread", "continuation"] as const)(
       );
       expect(container.querySelector("[data-own]")).toBeNull();
       expect(container.querySelector("[data-viewer-message]")).toBeNull();
+      // Authorship stays marked for themes while the row is unaligned.
+      expect(container.querySelector("[data-viewer-author]")).toHaveTextContent(
+        "Root",
+      );
       expect(container.querySelector(".buzz-avatar")).toHaveAttribute(
         "data-size",
         "default",
@@ -3367,6 +3376,7 @@ it.each([true, false])(
       );
       const audience = container.querySelector('[data-audience="agents"]');
       expect(audience?.hasAttribute("data-viewer-message")).toBe(own);
+      expect(audience?.hasAttribute("data-viewer-author")).toBe(own);
       fireEvent.click(
         screen.getByRole("button", { name: "author: A short preview…" }),
       );

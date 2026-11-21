@@ -1500,6 +1500,13 @@ function MessageRowContent({
             ? ""
             : undefined
         }
+        // Marks authorship in every density and alignment, for themes and
+        // plugin styles; Buzz's own styles read `data-viewer-message`.
+        data-viewer-author={
+          viewer && !row.workflowOwnerId && row.authorId === viewer
+            ? ""
+            : undefined
+        }
         data-own={(!attachmentOnly && !row.huddle && ownBubble) || undefined}
       >
         {!renderMessage && <span className={styles.messageGutter} />}
@@ -2010,6 +2017,13 @@ function AgentsMessageRow(props: MessageRowProps & { failure?: boolean }) {
               !flat &&
               (props.alignViewer ?? true) &&
               !row.workflowOwnerId &&
+              row.authorId === (props.viewer ?? session?.viewer)
+                ? ""
+                : undefined
+            }
+            data-viewer-author={
+              !row.workflowOwnerId &&
+              (props.viewer ?? session?.viewer) &&
               row.authorId === (props.viewer ?? session?.viewer)
                 ? ""
                 : undefined
