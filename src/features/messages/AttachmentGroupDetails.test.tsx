@@ -74,6 +74,25 @@ it("downloads every attachment in order, and retries only the ones that failed",
   );
 });
 
+it("saves two attachments that share a source under each name", async () => {
+  const user = userEvent.setup();
+  vi.mocked(downloadNativeMedia).mockResolvedValue(undefined);
+  render(
+    <AttachmentGroupDetails
+      noun="files"
+      items={[
+        { source: "native:a", name: "draft.pdf" },
+        { source: "native:a", name: "final.pdf" },
+      ]}
+    />,
+  );
+  await user.click(screen.getByRole("button", { name: "Download all" }));
+  expect(vi.mocked(downloadNativeMedia).mock.calls).toEqual([
+    ["native:a", "draft.pdf"],
+    ["native:a", "final.pdf"],
+  ]);
+});
+
 it("offers Download all only when every attachment can be saved", () => {
   render(
     <AttachmentGroupDetails

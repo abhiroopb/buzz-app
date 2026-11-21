@@ -18,8 +18,9 @@ export function AttachmentGroupDetails({
 }) {
   const [state, setState] = useState<State>("idle");
   const pending = useRef(false);
-  // Sources already saved, so a retry saves only the rest.
-  const saved = useRef(new Set<string>());
+  // Positions already saved, so a retry saves only the rest. Two attachments
+  // can share a source under different names.
+  const saved = useRef(new Set<number>());
   useEffect(() => {
     if (state !== "saved" && state !== "failed") return;
     const timer = setTimeout(() => setState("idle"), 4000);
@@ -41,11 +42,11 @@ export function AttachmentGroupDetails({
     let failed = false;
     // One at a time, so each save names its own file. A failure doesn't stop
     // the rest.
-    for (const { source, name } of sources) {
-      if (saved.current.has(source)) continue;
+    for (const [index, { source, name }] of sources.entries()) {
+      if (saved.current.has(index)) continue;
       try {
         await downloadNativeMedia(source, name);
-        saved.current.add(source);
+        saved.current.add(index);
       } catch {
         failed = true;
       }
