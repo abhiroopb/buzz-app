@@ -5,6 +5,7 @@ import {
   formatFullTimestamp,
   formatCompactTime,
   formatItemTimestamp,
+  formatTime,
 } from "../../shared/datetime";
 import { useClockPreference } from "../../shared/clock-preference";
 import { useLocalDay } from "../../shared/use-local-day";
@@ -87,7 +88,7 @@ export function MessageTimestamp({
   compact?: boolean;
 }) {
   useLocalDay();
-  useClockPreference();
+  const { messageTimeFormat } = useClockPreference();
   const date = new Date(createdAt * 1000);
   const fullDate = formatFullTimestamp(createdAt);
   // Keep accessible dates out of copied conversation text.
@@ -99,7 +100,9 @@ export function MessageTimestamp({
         <span aria-hidden="true">
           {compact
             ? formatCompactTime(createdAt)
-            : formatItemTimestamp(createdAt, { withTime: true })}
+            : messageTimeFormat === "time"
+              ? formatTime(createdAt)
+              : formatItemTimestamp(createdAt, { withTime: true })}
         </span>
         {accessible}
       </time>

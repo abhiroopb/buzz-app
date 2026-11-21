@@ -6,6 +6,9 @@ export type ClockPreference = {
   hourCycle: "system" | HourCycle;
   seconds: boolean;
   messageTimestamps: "show" | "hide-solo" | "hide";
+  /** A message's byline shows its clock time alone, as day dividers already
+   * name the day. The full date stays in the tooltip and for screen readers. */
+  messageTimeFormat: "date-time" | "time";
   /** Profile local times include how far ahead or behind the viewer they
    * are, and name the zone on a line of its own. */
   localTimeDetails: boolean;
@@ -24,7 +27,13 @@ function read(): ClockPreference {
   try {
     saved = Object(JSON.parse(localStorage.getItem(preferenceKey) ?? "{}"));
   } catch {}
-  const { hourCycle, seconds, messageTimestamps, localTimeDetails } = saved;
+  const {
+    hourCycle,
+    seconds,
+    messageTimestamps,
+    messageTimeFormat,
+    localTimeDetails,
+  } = saved;
   return {
     hourCycle:
       hourCycle === "h12" || hourCycle === "h23" ? hourCycle : "system",
@@ -33,6 +42,7 @@ function read(): ClockPreference {
       messageTimestamps === "hide-solo" || messageTimestamps === "hide"
         ? messageTimestamps
         : "show",
+    messageTimeFormat: messageTimeFormat === "time" ? "time" : "date-time",
     localTimeDetails: localTimeDetails !== false,
   };
 }
@@ -93,9 +103,14 @@ function subscribe(listener: () => void) {
 }
 
 function key() {
-  const { hourCycle, seconds, messageTimestamps, localTimeDetails } =
-    clockPreference();
-  return `${hourCycle} ${system} ${seconds} ${messageTimestamps} ${localTimeDetails}`;
+  const {
+    hourCycle,
+    seconds,
+    messageTimestamps,
+    messageTimeFormat,
+    localTimeDetails,
+  } = clockPreference();
+  return `${hourCycle} ${system} ${seconds} ${messageTimestamps} ${messageTimeFormat} ${localTimeDetails}`;
 }
 const pending = () => unsaved;
 

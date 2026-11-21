@@ -26,7 +26,11 @@ vi.stubGlobal("navigator", { ...navigator, platform: "MacIntel" });
 const afternoon = new Date(2026, 6, 30, 14, 5, 9).getTime() / 1_000;
 
 afterEach(() => {
-  setClockPreference({ hourCycle: "system", seconds: false });
+  setClockPreference({
+    hourCycle: "system",
+    seconds: false,
+    messageTimeFormat: "date-time",
+  });
   native.cycle = "h23";
 });
 
@@ -65,8 +69,22 @@ it("an explicit clock overrides the system and can show seconds", async () => {
     hourCycle: "h12",
     seconds: true,
     messageTimestamps: "show",
+    messageTimeFormat: "date-time",
     localTimeDetails: true,
   });
+  hook.unmount();
+});
+
+it("reads an unknown message time format as date and time", () => {
+  localStorage.setItem(
+    "buzz-clock.v1",
+    JSON.stringify({ messageTimeFormat: "weekday" }),
+  );
+  window.dispatchEvent(new StorageEvent("storage", { key: "buzz-clock.v1" }));
+  const hook = renderHook(() => useClockPreference());
+  expect(hook.result.current.messageTimeFormat).toBe("date-time");
+  act(() => setClockPreference({ messageTimeFormat: "time" }));
+  expect(hook.result.current.messageTimeFormat).toBe("time");
   hook.unmount();
 });
 

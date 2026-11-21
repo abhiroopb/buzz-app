@@ -65,6 +65,7 @@ afterEach(() => {
     hourCycle: "system",
     seconds: false,
     messageTimestamps: "show",
+    messageTimeFormat: "date-time",
     localTimeDetails: true,
   });
   localStorage.clear();
@@ -445,6 +446,8 @@ it("saves the clock, seconds, message timestamp and profile local time choices",
   await user.click(
     await screen.findByRole("option", { name: "Hide in Solo chats" }),
   );
+  await user.click(screen.getByRole("combobox", { name: "Message times" }));
+  await user.click(await screen.findByRole("option", { name: "Time only" }));
   await user.click(
     screen.getByRole("switch", { name: "Show time zone details on profiles" }),
   );
@@ -452,6 +455,7 @@ it("saves the clock, seconds, message timestamp and profile local time choices",
     hourCycle: "h23",
     seconds: true,
     messageTimestamps: "hide-solo",
+    messageTimeFormat: "time",
     localTimeDetails: false,
   });
   expect(JSON.parse(localStorage.getItem("buzz-clock.v1") ?? "")).toEqual(

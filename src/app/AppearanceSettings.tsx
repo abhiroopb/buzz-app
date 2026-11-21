@@ -404,6 +404,32 @@ export function AppearanceSettings({
                 />
               }
             />
+            {clock.messageTimestamps !== "hide" && (
+              <PreferenceRow
+                title="Message times"
+                subtitle="Day dividers already name the day. The full date stays in the tooltip."
+                trailing={
+                  <Select
+                    variant="compact"
+                    label="Message times"
+                    value={clock.messageTimeFormat}
+                    groups={[
+                      {
+                        label: "Format",
+                        options: [
+                          { value: "date-time", label: "Date and time" },
+                          { value: "time", label: "Time only" },
+                        ],
+                      },
+                    ]}
+                    onValueChange={(value) => {
+                      if (value === "date-time" || value === "time")
+                        setClockPreference({ messageTimeFormat: value });
+                    }}
+                  />
+                }
+              />
+            )}
             {verifiedCommunity && (
               <PreferenceRow
                 title="Show people by"

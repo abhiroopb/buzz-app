@@ -9,6 +9,7 @@ import {
 } from "@testing-library/react";
 import { memo } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { setClockPreference } from "../../shared/clock-preference";
 import {
   DayDivider,
   MessageTimestamp,
@@ -52,6 +53,26 @@ it("names the day outside today while retaining the full accessible date", () =>
       date.toLocaleString(undefined, { dateStyle: "full", timeStyle: "long" }),
     ),
   ).toHaveClass("sr-only");
+});
+it("shows only the clock time when message times are set to time only", () => {
+  const date = new Date(2026, 8, 21, 9, 5);
+  try {
+    setClockPreference({ hourCycle: "h23", messageTimeFormat: "time" });
+    const { container } = render(
+      <MessageTimestamp createdAt={date.getTime() / 1000} />,
+    );
+    expect(container.querySelector('[aria-hidden="true"]')).toHaveTextContent(
+      /^09:05$/,
+    );
+    // Screen readers still hear the full date the byline leaves out.
+    expect(container.querySelector(".sr-only")).toHaveTextContent("2026");
+    act(() => setClockPreference({ messageTimeFormat: "date-time" }));
+    expect(
+      container.querySelector('[aria-hidden="true"]'),
+    ).not.toHaveTextContent(/^09:05$/);
+  } finally {
+    setClockPreference({ hourCycle: "system", messageTimeFormat: "date-time" });
+  }
 });
 it("keeps a grouped timestamp accessible without a visible clock", () => {
   const date = new Date(2026, 8, 24, 9, 5);
