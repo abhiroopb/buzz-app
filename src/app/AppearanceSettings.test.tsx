@@ -463,6 +463,21 @@ it("saves the clock, seconds, message timestamp and profile local time choices",
   );
 });
 
+it("hides the message times choice while timestamps are hidden", async () => {
+  const user = userEvent.setup();
+  render(preferencesPage(), { wrapper: ToastProvider });
+  expect(
+    screen.getByRole("combobox", { name: "Message times" }),
+  ).toBeInTheDocument();
+  await user.click(
+    screen.getByRole("combobox", { name: "Message timestamps" }),
+  );
+  await user.click(await screen.findByRole("option", { name: "Hide" }));
+  expect(
+    screen.queryByRole("combobox", { name: "Message times" }),
+  ).not.toBeInTheDocument();
+});
+
 it("switches contrast through the shared select and restores it", async () => {
   const appearance = createAppearance();
   render(

@@ -407,7 +407,7 @@ export function AppearanceSettings({
             {clock.messageTimestamps !== "hide" && (
               <PreferenceRow
                 title="Message times"
-                subtitle="Day dividers already name the day. The full date stays in the tooltip."
+                subtitle="Time only drops the day from each message time. The full date stays in the tooltip."
                 trailing={
                   <Select
                     variant="compact"
