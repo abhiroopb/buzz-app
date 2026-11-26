@@ -623,6 +623,23 @@ it("fills the empty reply composer a message link opens, once per visit", async 
   expect(composerText()).not.toContain("Draft from a link");
 });
 
+it("opens the thread for a link draft to a recent message without replies", async () => {
+  // The newest message is in the head window and has no replies, so a plain
+  // link keeps it in the timeline; a draft needs its reply composer.
+  const h = await channelsPage({ writable: true });
+  const root = fixture.newer.at(-1)?.id ?? "";
+  const key = `draft:alpha:thread:${root}`;
+  const resolved: OpenTarget[] = [];
+  h.go(linkVisit(h, root, new Map(), resolved)("linked"));
+  await vi.waitFor(() => expect(composerText()).toContain("Draft from a link"));
+  expect(readView(draftScope(), key, "")).toBe("Draft from a link");
+  await act(flush);
+  expect(h.writes).toEqual({ signed: 0, published: 0 });
+  expect(resolved.at(-1)).not.toHaveProperty("draft");
+  // Resolving the draft away keeps the thread open with the draft in it.
+  expect(composerText()).toContain("Draft from a link");
+});
+
 it.each([
   ["without", false],
   ["with", true],

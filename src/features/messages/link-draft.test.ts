@@ -97,6 +97,29 @@ it("keeps the visit's applied mark when the visit can no longer resolve", async 
   expect(readView(scope, key, null)).toBeNull();
 });
 
+it("keeps the link's draft for a retry when saving it fails", () => {
+  const { nav, visit } = navigation();
+  void nav.open(link);
+  const opened = visit();
+  const setItem = vi
+    .spyOn(Storage.prototype, "setItem")
+    .mockImplementation(() => {
+      throw new DOMException("full", "QuotaExceededError");
+    });
+  try {
+    applyLinkDraft(opened, scope, "general", message, root);
+  } finally {
+    setItem.mockRestore();
+  }
+  expect(readView(scope, key, null)).toBeNull();
+  // Not marked applied, and the draft stays in the visit's address.
+  expect(opened.signal.aborted).toBe(false);
+  expect(nav.snapshot().entry.target).toMatchObject({ draft: "Ship it?" });
+  applyLinkDraft(opened, scope, "general", message, root);
+  expect(readView(scope, key, "")).toBe("Ship it?");
+  expect(nav.snapshot().entry.target).not.toHaveProperty("draft");
+});
+
 it("keeps a draft someone already wrote", () => {
   const { nav, visit } = navigation();
   writeView(scope, key, "Mine");

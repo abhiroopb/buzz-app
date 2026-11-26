@@ -31,12 +31,14 @@ export function applyLinkDraft(
     return;
   if (!navigation.position(SEEDED)) {
     const key = `draft:${channelId}:thread:${rootId}`;
-    // Unreadable storage could hide a saved draft; leave it alone.
+    // Unreadable storage could hide a saved draft; leave it alone. A failed
+    // save keeps the draft in the address, so the next open tries again.
     if (
       viewRevision(scope, key) !== undefined &&
-      !hasDraftContent(mentionDraft(readView<unknown>(scope, key, "")))
+      !hasDraftContent(mentionDraft(readView<unknown>(scope, key, ""))) &&
+      !writeView(scope, key, target.draft)
     )
-      writeView(scope, key, target.draft);
+      return;
     navigation.savePosition(SEEDED, true);
   }
   const { draft: _draft, ...address } = target;

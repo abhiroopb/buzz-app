@@ -1096,9 +1096,15 @@ function ChannelWorkspace({
       selected = true;
       // Freeze the presentation for this attempt. An isolated lookup or later
       // live event must not move an already-opened thread into the timeline.
+      // A link's draft fills the reply composer, so it always opens the thread.
       setExactOpening({
         request: navigation,
-        ...placeExactOpening(window, requestedMessage),
+        ...placeExactOpening(
+          window,
+          requestedMessage,
+          navigation.target.kind === "conversation" &&
+            navigation.target.draft !== undefined,
+        ),
       });
     };
     const stop = queries.channels.subscribeWindow(currentId, choose);
