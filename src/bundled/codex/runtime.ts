@@ -31,10 +31,10 @@ import {
 } from "../../features/agents/owner-attestation";
 import {
   type ConversationWake,
-  wakeAnchor,
-  wakeLands,
+  turnOf,
 } from "../../features/agent-harness/plugin-wake";
 import { compactAt } from "../../features/agents/compact-at";
+import { routeFor } from "../../features/agents/model-routes";
 import {
   composeBase,
   sectionsKey,
@@ -43,8 +43,15 @@ import {
   type StartedSections,
 } from "../../features/agent-harness/sections/compose";
 import { type Facts, LAYOUT } from "../../features/agent-harness/sections";
-import type { AgentKey } from "../../features/agents/membership";
+import { pubkeyOf, type AgentKey } from "../../features/agents/membership";
+import { hasOwnEnv } from "../agents/agent-env";
 import { type AgentReads, workflowMarked } from "../../features/agents/reads";
+import {
+  ownerLabel,
+  ownerRows,
+  ownerTurns,
+} from "../../features/agents/owner-view";
+import type { TranscriptTurn } from "../../features/agents/activity-transcript";
 import {
   EACH_TURN,
   sessionPrompts,
@@ -193,6 +200,7 @@ type Request = {
   team: string;
   session?: Delivery["session"];
   sessionContext?: string;
+  invocationContext?: string;
   /** The Solo chat's workspace Canvas section, if it has one. */
   project?: string;
   /** `project` for a turn that works where `worksElsewhere` says. */
@@ -202,6 +210,9 @@ type Request = {
   /** The model and effort the owner picked for this turn. */
   model?: string;
   effort?: string;
+  /** Chooses them as the turn this request starts begins
+   * (`Delivery.route`); one that steers asks nothing. */
+  route?: Delivery["route"];
   /** The synced settings in `settings`. */
   synced?: Delivery["synced"];
   /** Called once a final send answers this request, or one steered after it
@@ -211,7 +222,7 @@ type Request = {
   answered: (stopped?: boolean) => void;
   /** A failed final delivery stays pending until this request gets a reply. */
   finalDelivery?: Error | true;
-  step?: (tool: string, target?: string) => void;
+  step?: (tool: string, target?: string, origin?: "buzz") => void;
   acknowledged?: (input?: Readonly<{ steering?: true }>) => void;
   accepted?: () => void;
   superseded?: () => void;
@@ -431,6 +442,9 @@ function laneFor(entry: Entry, key: string, community: boolean) {
 type Loaded = Awaited<ReturnType<CodexRuntime["loadThread"]>>;
 type Server = {
   protection?: AgentProtection;
+  /** On the shared server: the agents it was chosen for, each once, when it
+   * started their work. An agent stays on it until it retires or it exits. */
+  routed?: Set<AgentKey>;
   rpc: AppServer;
   opening: Promise<AppServer>;
   /** Threads this process has loaded, and the agent, by key, each belongs to. */
@@ -504,6 +518,7 @@ function noteOf(request: Request) {
     ) ?? [];
   const notes = [
     request.sessionContext,
+    request.invocationContext,
     request.resumed ? RESUMED_PROMPT : undefined,
     ...request.notes,
     turnNote(
@@ -552,7 +567,15 @@ export class CodexRuntime {
   >();
   private server: Server | undefined;
   private closingSharedServer: Server | undefined;
-  private protectedServers = new Map<AgentKey, Server>();
+  /** An agent's own server: a protected one, or an unprotected one for an
+   * agent with environment variables of its own, which the shared one can't
+   * carry for one agent alone. */
+  private ownServers = new Map<AgentKey, Server>();
+  /** Whether an unprotected agent had its own environment variables when last
+   * read, until the next start decides its server with it. */
+  private ownEnv = new Map<AgentKey, boolean>();
+  /** Each agent's presence read in flight; retiring or disposing drops it. */
+  private envReads = new Map<AgentKey, Promise<void>>();
   private stopping = new Map<AgentKey, Promise<void>>();
   private stopped = new Map<AgentKey, Entry>();
   private disposals = new Map<
@@ -560,6 +583,10 @@ export class CodexRuntime {
     Map<AgentExecution, { done: Promise<void>; failed: boolean }>
   >();
   private views = new Map<AgentKey, readonly SessionView[]>();
+  /** The channels each live session has taken requests from, by
+   * `agent\nkey`: a community session's details show only while its owner
+   * can read every one. */
+  private sources = new Map<string, Set<string>>();
   private inventories = new Map<AgentKey, SavedConversation[] | null>();
   private inventoryReads = new Map<AgentKey, object>();
   private inventoryVersions = new Map<AgentKey, number>();
@@ -983,6 +1010,8 @@ export class CodexRuntime {
         control?.kind === "blocked"
           ? unattributedNotice(control.route.reason)
           : undefined;
+      const routing = this.route(this.handle(agent.key));
+      if (routing) await routing;
       const server = this.open(this.handle(agent.key));
       const rpc = await server.opening;
       const configured = this.resolveConfig(agent.config);
@@ -1080,10 +1109,13 @@ export class CodexRuntime {
       throw new Error("The protected agent has no live policy binding");
     handle?.protection?.assertAvailable();
     const settings = this.resolveConfig(agent.config);
+    // A saved route is current only while a router offers it.
+    const routed = routeFor("codex", settings.model) !== undefined;
     const key = JSON.stringify([
       settings.model,
       settings.effort,
       handle?.protection?.key,
+      routed,
     ]);
     const existing = this.previews.get(agent.key);
     if (existing?.key === key) return existing.ready;
@@ -1101,6 +1133,12 @@ export class CodexRuntime {
             ? [{ id: remote.model, label: remote.model, efforts: [] }]
             : [],
         };
+      }
+      const routing = this.route(handle);
+      if (routing) {
+        await routing;
+        if (this.previews.get(agent.key) !== entry)
+          throw new Error("Codex model preview is retired");
       }
       const server = this.open(handle);
       const rpc = server.rpc;
@@ -1122,6 +1160,10 @@ export class CodexRuntime {
       });
       // A configured model this Codex does not list still leaves the
       // listed ones to pick, so the picker stays.
+      // A saved route is the current choice; the agents service lists it.
+      // One no router offers runs on Codex's default, which is current.
+      if (routed)
+        return { current: settings.model, models: offered, sendDefaults: true };
       return !model || models.some((row) => row.model === model)
         ? { current: model ?? "", models: offered, sendDefaults: true }
         : {
@@ -1187,8 +1229,17 @@ export class CodexRuntime {
     ]);
     for (const listener of this.listeners) listener();
   }
+  private source(agent: AgentKey, key: string, request: Request) {
+    // A standalone wake has no channel to authorize.
+    if (request.conversation.channelId === COMMUNITY_SESSION) return;
+    const id = `${agent}\n${key}`;
+    const sources = this.sources.get(id) ?? new Set<string>();
+    sources.add(request.conversation.channelId);
+    this.sources.set(id, sources);
+  }
   /** Stops listing `key`'s session. */
   private forget(agent: AgentKey, key: string) {
+    this.sources.delete(`${agent}\n${key}`);
     const views = this.sessions(agent);
     if (!views.some((view) => view.key === key)) return;
     this.views.set(
@@ -1233,9 +1284,13 @@ export class CodexRuntime {
     );
     const entry = this.entries.get(agent) ?? this.stopped.get(agent);
     const protectedServer =
-      this.protectedServers.get(agent) ?? this.unretired.get(agent);
+      this.ownServers.get(agent) ?? this.unretired.get(agent);
     const sharedServer = this.server;
     const closingSharedServer = this.closingSharedServer;
+    // Its next start chooses its server again.
+    sharedServer?.routed?.delete(agent);
+    this.ownEnv.delete(agent);
+    this.envReads.delete(agent);
     const actions = [...(this.actions.get(agent) ?? [])];
     for (const action of actions) action.abort.abort();
     entry?.abort.abort();
@@ -1321,14 +1376,13 @@ export class CodexRuntime {
     await server.opening.catch(() => undefined);
     await server.rpc.close();
     if (this.unretired.get(agent) === server) this.unretired.delete(agent);
-    if (this.protectedServers.get(agent) === server)
-      this.protectedServers.delete(agent);
+    if (this.ownServers.get(agent) === server) this.ownServers.delete(agent);
   }
   sync(agents: readonly Agent[]) {
     const present = new Set(agents.map((agent) => agent.key));
     const held = new Set([
       ...this.entries.keys(),
-      ...this.protectedServers.keys(),
+      ...this.ownServers.keys(),
       ...this.unretired.keys(),
       ...this.stopped.keys(),
       ...this.disposals.keys(),
@@ -1366,10 +1420,7 @@ export class CodexRuntime {
       if (!server) return;
       for (const [threadId, owner] of server.threads)
         if (owner === agent) {
-          if (
-            this.server !== server &&
-            this.protectedServers.get(agent) !== server
-          )
+          if (this.server !== server && this.ownServers.get(agent) !== server)
             return;
           await server.rpc
             .request("thread/backgroundTerminals/clean", { threadId })
@@ -1394,6 +1445,7 @@ export class CodexRuntime {
       void remote.execution.dispose();
     }
     this.remote.clear();
+    this.envReads.clear();
     this.previews.clear();
     this.inventories.clear();
     this.inventoryReads.clear();
@@ -1409,9 +1461,8 @@ export class CodexRuntime {
     this.open();
   }
   private close() {
-    for (const server of this.protectedServers.values())
-      void server.rpc.close();
-    this.protectedServers.clear();
+    for (const server of this.ownServers.values()) void server.rpc.close();
+    this.ownServers.clear();
     for (const server of this.unretired.values()) void server.rpc.close();
     this.unretired.clear();
     void this.server?.rpc.close();
@@ -1431,13 +1482,13 @@ export class CodexRuntime {
       protection.assertAvailable();
       // A prior worker with another key belongs to a replaced provider, which
       // is already stopping it; the replacement starts once it has exited.
-      const prior = this.protectedServers.get(agent.key);
+      const prior = this.ownServers.get(agent.key);
       if (prior?.protection?.key === protection.key) return prior;
       const host = this.protectionHost;
       if (!host?.serveMcp)
         throw new Error("Protected Codex requires the desktop security host");
       const serveMcp = host.serveMcp.bind(host);
-      const rpc = new AppServer((call) => this.tool(call));
+      const rpc = new AppServer((call, tokens) => this.tool(call, tokens));
       const server: Server = {
         rpc,
         protection,
@@ -1451,8 +1502,8 @@ export class CodexRuntime {
         rpc.onMessage((wire) => {
           if (wire.method !== "connection/closed") return;
           void bridge.close();
-          if (this.protectedServers.get(agent.key) !== server) return;
-          this.protectedServers.delete(agent.key);
+          if (this.ownServers.get(agent.key) !== server) return;
+          this.ownServers.delete(agent.key);
           // A failed connection can leave its process running; unless a
           // retirement already owns its close, it is tracked until it exits.
           if (!rpc.exited && !this.unretired.has(agent.key))
@@ -1499,33 +1550,129 @@ export class CodexRuntime {
           throw error;
         }
       })();
-      this.protectedServers.set(agent.key, server);
+      this.ownServers.set(agent.key, server);
       void server.opening.catch(() => {
-        if (this.protectedServers.get(agent.key) === server)
-          this.protectedServers.delete(agent.key);
+        if (this.ownServers.get(agent.key) === server)
+          this.ownServers.delete(agent.key);
       });
       return server;
     }
-    if (this.server) return this.server;
+    const own = agent && this.ownServers.get(agent.key);
+    if (own) return own;
+    if (agent && !this.server?.routed?.has(agent.key)) {
+      const hasOwn = this.ownEnv.get(agent.key);
+      this.ownEnv.delete(agent.key);
+      if (hasOwn) return this.openOwn(agent.key);
+    }
+    const shared = this.shared();
+    if (agent) shared.routed?.add(agent.key);
+    return shared;
+  }
+  /** Reads, before `open` chooses its server, whether an unprotected agent
+   * has its own environment variables. Unreadable is none, read again at its
+   * next start. */
+  private route(
+    agent: Pick<AgentHandle, "key" | "pubkey" | "protection"> | undefined,
+  ): Promise<void> | undefined {
+    if (
+      !agent ||
+      agent.protection ||
+      this.target ||
+      this.ownServers.has(agent.key) ||
+      this.server?.routed?.has(agent.key)
+    )
+      return undefined;
+    const key = agent.key;
+    const pending = this.envReads.get(key);
+    if (pending) return pending;
+    const read: Promise<void> = hasOwnEnv(key).then((own) => {
+      // An answer that outlived its agent's retirement or the runtime is
+      // dropped, and so is the start that waited for it.
+      if (this.disposed || this.envReads.get(key) !== read)
+        throw new Error("Codex was stopped");
+      this.envReads.delete(key);
+      this.ownEnv.set(key, own === true);
+    });
+    this.envReads.set(key, read);
+    return read;
+  }
+  /** Waits for `route` unless `signal` fires first, so a cancelled start
+   * ends while its read is still out; callers check `signal` after it.
+   * Synchronous when there is nothing to read, so a start keeps its order. */
+  private routed(
+    agent: Pick<AgentHandle, "key" | "pubkey" | "protection">,
+    signal: AbortSignal,
+  ): Promise<void> | undefined {
+    const routing = this.route(agent);
+    return (
+      routing &&
+      abortable(routing, signal).catch((error) => {
+        if (!signal.aborted) throw error;
+      })
+    );
+  }
+  /** Whether `rpc` is an unprotected server's, shared or an agent's own. */
+  private ordinary(rpc: AppServer) {
+    if (this.server?.rpc === rpc) return true;
+    for (const server of this.ownServers.values())
+      if (server.rpc === rpc) return !server.protection;
+    return false;
+  }
+  private spawnOrdinary(envAgent?: AgentKey): Spawn {
+    return (id, options) =>
+      this.spawn(id, {
+        ...options,
+        secrets: [...(options?.secrets ?? []), "agent-env"],
+        ...(envAgent && { envAgent: pubkeyOf(envAgent) }),
+        args: [
+          ...(options?.args ?? []),
+          ...(this.hooks && !this.target ? callbackHookArgs : []),
+        ],
+      });
+  }
+  /** An agent's own unprotected server, closed and tracked like a protected
+   * one: its exit, not a disconnect alone, lets the agent start again. */
+  private openOwn(agent: AgentKey) {
+    this.assertRetired(agent, true);
     const rpc = new AppServer((call) => this.tool(call));
+    const open = () => rpc.open(this.spawnOrdinary(agent), defaults.workspace);
+    // Like a shared replacement, it starts once a disconnected shared
+    // process, which may still run this agent's work, has exited.
+    const previous = this.closingSharedServer;
+    const server: Server = {
+      rpc,
+      threads: new Map(),
+      opening: previous ? this.waitForSharedExit(previous).then(open) : open(),
+    };
+    rpc.onMessage((wire) => {
+      if (wire.method !== "connection/closed") return;
+      if (this.ownServers.get(agent) !== server) return;
+      this.ownServers.delete(agent);
+      if (!rpc.exited && !this.unretired.has(agent))
+        void this.shutdown(agent, server).catch(() => undefined);
+    });
+    this.ownServers.set(agent, server);
+    // A failed start can leave its process running; unless a retirement or
+    // its disconnect already owns its close, it is tracked until it exits.
+    void server.opening.catch(() => {
+      if (this.ownServers.get(agent) !== server) return;
+      this.ownServers.delete(agent);
+      if (!this.unretired.has(agent))
+        void this.shutdown(agent, server).catch(() => undefined);
+    });
+    return server;
+  }
+  private shared() {
+    if (this.server) return this.server;
+    const rpc = new AppServer((call, tokens) => this.tool(call, tokens));
     // Threads set their own cwd; the process just needs a directory that exists.
-    const open = () =>
-      rpc.open(
-        (id, options) =>
-          this.spawn(id, {
-            ...options,
-            args: [
-              ...(options?.args ?? []),
-              ...(this.hooks && !this.target ? callbackHookArgs : []),
-            ],
-          }),
-        defaults.workspace,
-      );
+    const open = () => rpc.open(this.spawnOrdinary(), defaults.workspace);
     const previous = this.closingSharedServer;
     const server: Server = {
       rpc,
       opening: previous ? this.waitForSharedExit(previous).then(open) : open(),
       threads: new Map(),
+      routed: new Set(),
     };
     rpc.onMessage((wire) => {
       if (wire.method !== "connection/closed" || this.server !== server) return;
@@ -1677,16 +1824,24 @@ export class CodexRuntime {
       ...new Map([...saved, ...held].map((row) => [row.key, row])).values(),
     ].sort((a, b) => (b.at ?? 0) - (a.at ?? 0));
   }
-  private localConversations(agent: AgentKey) {
-    const reads = this.reads(agent);
-    const saved =
+  mayRestartForBaseInstructions(agent: AgentKey, scope: string) {
+    return Object.values(this.localBindings(agent, scope)).some(
+      ({ sections }) =>
+        !this.keepsSections(sections, { custom: true, plugin: false }),
+    );
+  }
+  private localBindings(agent: AgentKey, scope = this.reads(agent)?.scope) {
+    return (
       this.entries.get(agent)?.saved ??
-      (reads ? this.load(this.storageKey(reads.scope, agent)) : {});
-    return this.savedConversations(agent, saved);
+      (scope === undefined ? {} : this.load(this.storageKey(scope, agent)))
+    );
+  }
+  private localConversations(agent: AgentKey) {
+    return this.savedConversations(agent, this.localBindings(agent));
   }
   private savedConversations(agent: AgentKey, saved: Record<string, Saved>) {
     const reads = this.reads(agent);
-    return Object.entries(saved)
+    const rows = Object.entries(saved)
       .reverse()
       .flatMap(([key, { threadId, at }]) => {
         try {
@@ -1705,7 +1860,7 @@ export class CodexRuntime {
               key,
               channelId,
               ...(community ? { community: true as const } : {}),
-              ...reads?.channelLabel(channelId),
+              ...ownerLabel(reads, channelId),
               ...(root === "channel" ? {} : { root }),
               threadId,
               ...(at === undefined ? {} : { at }),
@@ -1716,6 +1871,7 @@ export class CodexRuntime {
         }
       })
       .sort((a, b) => (b.at ?? 0) - (a.at ?? 0));
+    return ownerRows(rows, reads);
   }
   /** A display name for a pubkey in the agent's community, if known. */
   name(agent: AgentKey, pubkey: string) {
@@ -1757,7 +1913,45 @@ export class CodexRuntime {
   /** The community's current name and kind for a channel, if it lists it;
    * `useOpenedSession` gives them to a thread `find` returned. */
   channelLabel(agent: AgentKey, channelId: string) {
-    return this.reads(agent)?.channelLabel(channelId);
+    return ownerLabel(this.reads(agent), channelId);
+  }
+  /** Whether the live session `key` is of a conversation its owner can read. */
+  readableSession(agent: AgentKey, key: string) {
+    // A standalone watch or timer run, keyed `type/id`, is the owner's own.
+    if (!key.startsWith("[")) return true;
+    try {
+      const [channelId] = JSON.parse(key) as unknown[];
+      return (
+        channelId === COMMUNITY_SESSION ||
+        (typeof channelId === "string" &&
+          this.reads(agent)?.ownerReadable(channelId) === true)
+      );
+    } catch {
+      return false;
+    }
+  }
+  /** Whether the live session `key`'s details came only from requests in
+   * channels its owner can read. */
+  readableDetail(agent: AgentKey, key: string): boolean {
+    // An execution target's sessions are its own runtime's to authorize.
+    const remote = [...this.remote.values()].find(
+      (entry) =>
+        entry.agent === agent &&
+        entry.runtime.sessions(agent).some((view) => view.key === key),
+    );
+    if (remote) return remote.runtime.readableDetail(agent, key);
+    const reads = this.reads(agent);
+    return [...(this.sources.get(`${agent}\n${key}`) ?? [])].every(
+      (channelId) => reads?.ownerReadable(channelId) === true,
+    );
+  }
+  /** The turns of `conversation` its owner can read. */
+  readable(
+    agent: AgentKey,
+    conversation: Readonly<{ channelId: string; community?: true }>,
+    turns: readonly TranscriptTurn[],
+  ) {
+    return ownerTurns(turns, this.reads(agent), conversation);
   }
   /** What each of the agent's threads started with. */
   prompts(agent: AgentKey) {
@@ -1776,8 +1970,10 @@ export class CodexRuntime {
     // memory versions and search; v14 splits canvas into canvas_get and
     // canvas_set; v15 removes message keywords; v16 splits channel and
     // channels into the channel_* tools; v17 split members into the
-    // member_* tools; v18 adds search and removes read's q.
-    return `buzz.codex.sessions.v18:${scope}:${agent}${sessionKey ? `:session:${sessionKey}` : ""}`;
+    // member_* tools; v18 adds search and removes read's q; v19 replaces
+    // solo_workspace_list with workspace_list and adds channel_move; v20
+    // adds canvas versions.
+    return `buzz.codex.sessions.v20:${scope}:${agent}${sessionKey ? `:session:${sessionKey}` : ""}`;
   }
   private save(request: Request, entry: Entry, key: string, saved: Saved) {
     // Reinserted so the bounded set keeps the most recently used bindings.
@@ -1894,6 +2090,8 @@ export class CodexRuntime {
       if (!connection) throw new Error("Voice startup was interrupted");
       return connection;
     }
+    const routing = this.route(agent);
+    if (routing) await routing;
     await rememberCommunitySource(
       this.storage,
       agent.key,
@@ -2233,8 +2431,6 @@ export class CodexRuntime {
     // code, and the agent's own handoff comes from a turn already acting
     // for the owner.
     const wake = trigger.type !== "mention" ? trigger : undefined;
-    const event =
-      trigger.type !== "mention" ? wakeAnchor(trigger) : trigger.event;
     // A workflow's mention waits out a reconnect; the check below decides.
     const ready =
       trigger.type === "mention" && workflowMarked(trigger.event, agent.owner)
@@ -2269,8 +2465,12 @@ export class CodexRuntime {
     const channel = await reads.channel(channelId);
     const solo = await reads.soloChat(agent.owner, channelId, delivery.signal);
     const huddle = isHuddleRoom(channel?.about);
-    const topLevel = solo || huddle || wake?.topLevel === true;
-    if (wake && !wakeLands(wake, topLevel)) return delivery.ignored?.();
+    // Where the host placed it. A Huddle room is Codex's own reason to
+    // answer at the top level.
+    const turn = turnOf(trigger, delivery, channelId, solo || huddle);
+    if (!turn) return delivery.ignored?.();
+    const { event } = turn;
+    const topLevel = turn.topLevel || huddle;
     // Only a Solo chat's Canvas is handed over.
     const canvas = reads.canvas?.bind(reads);
     const [canvasRead, folders] = await Promise.all([
@@ -2433,6 +2633,7 @@ export class CodexRuntime {
       event,
       ...(!topLevel ? { replyRoot: route?.parent ?? rootOf(event) } : {}),
       ...(route ? { sourceRoot: route.root } : {}),
+      ...(route?.turnContext ? { invocationContext: route.turnContext } : {}),
       ...(wake ? { wake } : {}),
       ...(delivery.wakeText ? { wakeText: delivery.wakeText } : {}),
       agent,
@@ -2440,6 +2641,7 @@ export class CodexRuntime {
       ...(toolRoot ? { toolRoot } : {}),
       ...(delivery.model ? { model: delivery.model } : {}),
       ...(delivery.effort ? { effort: delivery.effort } : {}),
+      ...(delivery.route ? { route: delivery.route } : {}),
       ...(delivery.synced ? { synced: delivery.synced } : {}),
       activityScope: topLevel
         ? channelId
@@ -2520,6 +2722,7 @@ export class CodexRuntime {
         (request.model && request.model !== targetModel) ||
         (request.effort && request.effort !== targetEffort));
     entry.waiting.add(request);
+    this.source(agent.key, key, request);
     delivery.interruptible?.(() =>
       this.interrupt(entry, key, request, reserved),
     );
@@ -2822,6 +3025,7 @@ export class CodexRuntime {
         },
       };
       entry.waiting.add(request);
+      this.source(agent.key, key, request);
       try {
         const handoff = this.controls.deliver(
           `${agent.key}/${key}`,
@@ -2885,8 +3089,14 @@ export class CodexRuntime {
     await entry.after;
     if (entry.abort.signal.aborted)
       return { ok: false, error: "Codex was stopped" };
-    const server = this.open(agent);
     const signal = AbortSignal.any([entry.abort.signal, turnSignal]);
+    const routing = this.routed(agent, signal);
+    if (routing) await routing;
+    if (entry.abort.signal.aborted)
+      return { ok: false, error: "Codex was stopped" };
+    if (turnSignal.aborted)
+      return { ok: false, error: message(turnSignal.reason) };
+    const server = this.open(agent);
     /** Why this turn ran without the Buzz context, for its Activity status. */
     let notice = delivery.gatewayFallback?.notice;
     let release!: () => void;
@@ -3216,6 +3426,30 @@ export class CodexRuntime {
           request.answered();
           return;
         }
+        // Its model route chooses as the turn begins; messages behind it
+        // steer in on that choice.
+        if (request.route) {
+          let chosen: Awaited<ReturnType<NonNullable<Delivery["route"]>>>;
+          try {
+            chosen = await request.route();
+          } finally {
+            delete request.route;
+          }
+          if (!chosen) {
+            request.answered(true);
+            return;
+          }
+          if (chosen.model) request.model = chosen.model;
+          if (chosen.effort) request.effort = chosen.effort;
+          if (entry.abort.signal.aborted) {
+            request.failActivity("Codex was stopped");
+            return;
+          }
+          if (request.current && !request.current()) {
+            request.answered();
+            return;
+          }
+        }
         try {
           await entry.after;
           // A rerun waits for the retired Huddle seat to let go of the lane.
@@ -3335,7 +3569,10 @@ export class CodexRuntime {
       ],
     });
   }
-  private async tool(call: ToolCall): Promise<ToolReply> {
+  private async tool(
+    call: ToolCall,
+    contextTokens?: number,
+  ): Promise<ToolReply> {
     const entries = [...this.entries.values()];
     const matches = (turn?: { threadId?: string; turnId?: string }) =>
       turn?.threadId === call?.threadId && turn?.turnId === call?.turnId;
@@ -3393,6 +3630,8 @@ export class CodexRuntime {
     const { agent } = owner;
     const client = () =>
       appClient(agent, {
+        // Each message it posts carries its thread's context size.
+        contextTokens: () => contextTokens,
         // Its tool registry reviews every call, Buzz's dynamic tools included.
         ...(!this.target ? { nativeCall: check } : {}),
         nativeToolGate: true,
@@ -3403,7 +3642,7 @@ export class CodexRuntime {
         protectionContext: async () => {
           const rpc =
             active?.rpc ??
-            this.protectedServers.get(agent.key)?.rpc ??
+            this.ownServers.get(agent.key)?.rpc ??
             this.server?.rpc;
           if (!rpc)
             throw new Error("The protected Codex session is unavailable");
@@ -3632,7 +3871,7 @@ export class CodexRuntime {
             ),
             "features.plugins": false,
             "features.apps": false,
-            ...(this.server?.rpc === rpc && this.hooks
+            ...(this.ordinary(rpc) && this.hooks
               ? { "hooks.state": await nativeHookState(rpc, cwd, false) }
               : {}),
           },
@@ -3729,11 +3968,11 @@ export class CodexRuntime {
     const features = normalized.config.features;
     const disabled = (features?.hooks ?? features?.codex_hooks) === false;
     const hooks =
-      !disabled && this.server?.rpc === rpc && this.hooks
+      !disabled && this.ordinary(rpc) && this.hooks
         ? await nativeHookState(rpc, workspace)
         : undefined;
     const hookAdapter =
-      !disabled && this.server?.rpc === rpc ? this.hooks : undefined;
+      !disabled && this.ordinary(rpc) ? this.hooks : undefined;
     const bridge = hookAdapter
       ? await openHookBridge(hookAdapter.serve, (session, event, input) =>
           hookAdapter.run(agent.key, session, event, input),
@@ -4076,7 +4315,6 @@ export class CodexRuntime {
     let notReady!: (error: unknown) => void;
     let release!: () => void;
     const turnAbort = new AbortController();
-    const server = this.open(request.agent);
     // No deadline of our own: a turn runs until Codex ends it.
     const signal = AbortSignal.any([
       entry.abort.signal,
@@ -4084,6 +4322,19 @@ export class CodexRuntime {
       ...(request.unaddressed ? [request.unaddressed.signal] : []),
       ...(adopted && lane.voice ? [lane.voice.signal] : []),
     ]);
+    const routing = this.routed(request.agent, signal);
+    if (routing) await routing;
+    if (signal.aborted) {
+      // As a turn cancelled once started ends, without publishing.
+      if (entry.abort.signal.aborted) request.failActivity("Codex was stopped");
+      else {
+        request.failActivity(message(signal.reason));
+        if (request.unaddressed?.signal.aborted)
+          this.status(request.agent.key, key, "Stopped");
+      }
+      return;
+    }
+    const server = this.open(request.agent);
     const active: Active = {
       rpc: server.rpc,
       ...(adopted && lane.voice
@@ -4120,7 +4371,7 @@ export class CodexRuntime {
         const step = method === "item/started" ? codexStep(item) : undefined;
         if (step)
           for (const taken of active.activity.values())
-            taken.step?.(step.tool, step.target);
+            taken.step?.(step.tool, step.target, step.origin);
         if (method === "item/started" && item.command)
           this.status(agent.key, key, "Working", item.command);
         if (method === "item/completed" && item.type === "commandExecution")
@@ -4518,7 +4769,7 @@ export class CodexRuntime {
               if (
                 !turnFailed &&
                 (this.server === server ||
-                  this.protectedServers.get(agent.key) === server)
+                  this.ownServers.get(agent.key) === server)
               )
                 this.status(agent.key, key, "Needs attention", message(error));
               if (error instanceof RequestTimeout)
@@ -4653,10 +4904,12 @@ function continueSession(
 }
 
 /** A started Codex item as a step, named in the shared step vocabulary.
- * Shapes follow codex app-server v2 `ThreadItem` / `CommandAction` (camelCase). */
+ * Shapes follow codex app-server v2 `ThreadItem` / `CommandAction` (camelCase).
+ * `origin` marks a call in the `buzz` tool namespace or to a `buzz` MCP
+ * server. */
 export function codexStep(
   item: Record<string, unknown> | undefined,
-): { tool: string; target?: string } | undefined {
+): { tool: string; target?: string; origin?: "buzz" } | undefined {
   const text = (value: unknown) =>
     typeof value === "string" && value ? value : undefined;
   const step = (tool: string, target?: unknown) => {
@@ -4686,8 +4939,14 @@ export function codexStep(
       return step("Edit", file(first?.path));
     }
     case "mcpToolCall":
-    case "dynamicToolCall":
-      return text(item.tool) ? step(String(item.tool)) : undefined;
+    case "dynamicToolCall": {
+      if (!text(item.tool)) return undefined;
+      const from = item.type === "mcpToolCall" ? item.server : item.namespace;
+      return {
+        tool: String(item.tool),
+        ...(from === "buzz" ? { origin: "buzz" as const } : {}),
+      };
+    }
     case "collabAgentToolCall":
       return step("Agent", item.prompt);
     case "webSearch":

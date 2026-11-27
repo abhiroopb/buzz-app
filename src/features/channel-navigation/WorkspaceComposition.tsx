@@ -6,11 +6,9 @@ import {
 import { IconButton } from "../../shared/design-system/ui/IconButton";
 import { MenuItem } from "../../shared/design-system/ui/Menu";
 import type { NavigationSectionTrailing } from "../../shared/design-system/ui/NavigationSection";
-import {
-  Cube3dSphereIcon,
-  PencilSimpleIcon,
-} from "../../shared/design-system/icons";
+import { Cube3dSphereIcon, PlusIcon } from "../../shared/design-system/icons";
 import { SoloDisclosure } from "./SoloDisclosure";
+import { RegionDestinationContext } from "./SoloDestination";
 import type { SoloWorkspaceProps } from "./solo-navigation-contract";
 import styles from "./WorkspaceComposition.module.css";
 
@@ -58,6 +56,7 @@ export function RegionChatList() {
 /** One shared workspace surface. A source supplies its tasks and selection. */
 export function RegionWorkspace(props: SoloWorkspaceProps) {
   const parts = useContext(WorkspaceCompositionContext);
+  const destination = useContext(RegionDestinationContext);
   const workspace = parts?.workspaces.find(
     (item) => item.id === (props.id ?? ""),
   );
@@ -108,7 +107,7 @@ export function RegionWorkspace(props: SoloWorkspaceProps) {
               data-solo-workspace-new-task=""
               aria-label={`New task in ${title}`}
               title="New task"
-              icon={<PencilSimpleIcon size={15} />}
+              icon={<PlusIcon size={15} strokeWidth={2.5} />}
               onClick={props.onNewTask}
             />
           ),
@@ -119,6 +118,16 @@ export function RegionWorkspace(props: SoloWorkspaceProps) {
             {props.onNewTask && (
               <MenuItem onClick={props.onNewTask}>New task</MenuItem>
             )}
+            {props.headerMenuActions?.map((action) => (
+              <MenuItem
+                key={action.id}
+                onClick={() =>
+                  void destination?.runAction(() => action.onSelect())
+                }
+              >
+                {action.label}
+              </MenuItem>
+            ))}
           </>,
           {
             accessory,

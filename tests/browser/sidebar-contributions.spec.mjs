@@ -327,6 +327,172 @@ appTest.describe("workspace composition", () => {
   );
 });
 
+appTest.describe("sidebar refresh", () => {
+  const soloChannels = Array.from(
+    { length: 16 },
+    (_, i) => `60000000-0000-4000-8000-${String(i).padStart(12, "0")}`,
+  );
+  appTest.use({
+    productionBroker: true,
+    channelIds: soloChannels,
+    soloChannels,
+    ownSoloChannels: soloChannels,
+    viewport: { width: 1100, height: 375 },
+  });
+
+  // A repaint can change visible rows while scrollTop stays the same.
+  appTest(
+    "keeps visible Solo rows in place when a task moves above them",
+    async ({ page, app }) => {
+      await page.goto(`${app.origin}/?solo-region-fixture`);
+      await openPage(page, "Messages");
+      const viewport = page.getByRole("navigation", {
+        name: "Subscribed channels",
+      });
+      const lastSoloRow = viewport.locator(
+        `[data-solo-destination-id="${soloChannels.at(-1)}"]`,
+      );
+      const showMore = viewport.getByRole("button", {
+        name: "Show more in Solo",
+      });
+      // The roster can be ready while the Solo section lists only its first rows.
+      await expect(lastSoloRow.or(showMore).first()).toBeVisible();
+      if (await showMore.isVisible()) await showMore.click();
+      await expect(lastSoloRow).toBeVisible();
+      await page.evaluate(async (ids) => {
+        for (const id of ids) await window.fixtureSoloRegion.classify(id);
+      }, soloChannels);
+      const rowSelector =
+        '[data-sidebar-section^="solo-region:"] [data-solo-destination-id]';
+      const rows = viewport.locator(rowSelector);
+      await expect(rows).toHaveCount(soloChannels.length);
+      // Finish moving the original Solo rows before measuring the anchor.
+      await expect(
+        viewport.locator(
+          '[data-sidebar-section="solo"] [data-solo-destination-id]',
+        ),
+      ).toHaveCount(0);
+      // A contributed task can have a compact link inside its full-width row.
+      await rows.evaluateAll((links) => {
+        for (const link of links)
+          link.style.clipPath = "inset(0 calc(100% - 72px) 0 0)";
+      });
+      const anchor = rows.nth(6);
+      const anchorId = await anchor.getAttribute("data-solo-destination-id");
+      const promotedId = await rows
+        .nth(12)
+        .getAttribute("data-solo-destination-id");
+      const position = (id = anchorId) =>
+        rows
+          .and(page.locator(`[data-solo-destination-id="${id}"]`))
+          .evaluate((row) => {
+            const port = row.closest('nav[aria-label="Subscribed channels"]');
+            return (
+              row.getBoundingClientRect().top - port.getBoundingClientRect().top
+            );
+          });
+      await viewport.evaluate(
+        async (port, offset) => {
+          port.scrollTop += offset - 12;
+          // Let the scroll event record this position before publishing rows.
+          await new Promise((resolve) =>
+            requestAnimationFrame(() => requestAnimationFrame(resolve)),
+          );
+        },
+        await position(),
+      );
+      const before = await position();
+      expect(before).toBeGreaterThanOrEqual(0);
+      expect(before).toBeLessThan(
+        await viewport.evaluate((port) => port.clientHeight),
+      );
+
+      const order = await rows.evaluateAll((elements) =>
+        elements.map((element) => element.dataset.soloDestinationId),
+      );
+      const index = order.indexOf(anchorId);
+      const neighbor = order[index + 1];
+      const removed = order[index + 2];
+      const neighborBefore = await position(neighbor);
+      const afterFirst = await viewport.evaluate(
+        (port, { rowSelector, promotedId, removed, anchorId }) =>
+          new Promise((resolve) => {
+            const observer = new MutationObserver(() => {
+              const rows = port.querySelectorAll(rowSelector);
+              if (rows[0]?.dataset.soloDestinationId !== promotedId) return;
+              observer.disconnect();
+              const anchor = [...rows].find(
+                (row) => row.dataset.soloDestinationId === anchorId,
+              );
+              resolve(
+                anchor.getBoundingClientRect().top -
+                  port.getBoundingClientRect().top,
+              );
+              // Publish again before the browser dispatches the scroll event
+              // for the first correction. Keep the surviving neighbor in place.
+              window.fixtureSoloRegion.present([removed], [], anchorId);
+            });
+            observer.observe(port, { childList: true, subtree: true });
+            window.fixtureSoloRegion.present([], [], promotedId);
+          }),
+        { rowSelector, promotedId, removed, anchorId },
+      );
+      expect(afterFirst).toBe(before);
+      await expect(rows.first()).toHaveAttribute(
+        "data-solo-destination-id",
+        anchorId,
+      );
+      await expect(rows).toHaveCount(soloChannels.length - 1);
+      await expect.poll(() => position(neighbor)).toBe(neighborBefore);
+
+      const focusOrder = await rows.evaluateAll((elements) =>
+        elements.map((element) => element.dataset.soloDestinationId),
+      );
+      const focusedId = focusOrder[3];
+      const next = focusOrder[4];
+      await viewport.evaluate(
+        async (port, offset) => {
+          port.scrollTop += offset;
+          await new Promise((resolve) =>
+            requestAnimationFrame(() => requestAnimationFrame(resolve)),
+          );
+        },
+        await position(focusOrder[0]),
+      );
+      const focused = rows.and(
+        page.locator(`[data-solo-destination-id="${focusedId}"]`),
+      );
+      await focused.evaluate((row) => row.focus({ preventScroll: true }));
+      await expect(focused).toBeFocused();
+      await page.evaluate(
+        ({ removed, focusedId, next }) =>
+          window.fixtureSoloRegion.present([removed, focusedId], [], next),
+        { removed, focusedId, next },
+      );
+      await expect(rows.first()).toHaveAttribute(
+        "data-solo-destination-id",
+        next,
+      );
+      await expect(focused).toHaveCount(0);
+      await expect
+        .poll(() =>
+          viewport.evaluate((port) => {
+            const focus = document.activeElement;
+            if (
+              !port.contains(focus) ||
+              !focus.hasAttribute("data-solo-destination-id")
+            )
+              return false;
+            const frame = port.getBoundingClientRect();
+            const box = focus.getBoundingClientRect();
+            return box.top >= frame.top && box.bottom <= frame.bottom;
+          }),
+        )
+        .toBe(true);
+    },
+  );
+});
+
 appTest.describe("Solo header accessories", () => {
   appTest.use({
     productionBroker: true,
@@ -348,6 +514,81 @@ appTest.describe("Solo header accessories", () => {
       });
     });
   };
+
+  appTest.describe("Team channel actions", () => {
+    const title = "alpha-channel-planning-and-weekly-status-updates";
+    appTest.use({
+      channelNames: { alpha: title, beta: "Beta", gamma: "Gamma" },
+    });
+
+    appTest(
+      "keeps both actions clickable and clear of the title",
+      async ({ page, app }) => {
+        await admitNewTask(page);
+        await page.goto(
+          `${app.origin}/?solo-region-fixture&team-row-channel-group`,
+        );
+        await openPage(page, "Messages");
+        const group = page.locator('[data-team-row-channel-group="alpha"]');
+        const actions = group.getByRole("button", {
+          name: `Actions for ${title}`,
+        });
+        const newTask = group.getByRole("button", {
+          name: `New task in ${title}`,
+        });
+        const draft = group.getByRole("textbox", { name: "New task title" });
+        const channel = group.getByRole("button", { name: title, exact: true });
+        const label = channel.locator(".navigation-item-label");
+        await channel.hover();
+        await expect(actions).toHaveCSS("opacity", "1");
+        await expect(newTask).toHaveCSS("opacity", "1");
+        const mask = await label.evaluate(
+          (element) => getComputedStyle(element).maskImage,
+        );
+        expect(mask).not.toBe("none");
+        await newTask.hover();
+        await expect(label).toHaveCSS("mask-image", mask);
+        await actions.click();
+        const menu = page.getByRole("menu", { name: `Actions for ${title}` });
+        await expect(menu).toBeVisible();
+        await expect(draft).toHaveCount(0);
+        await menu.getByRole("menuitem").first().focus();
+        await page.keyboard.press("Escape");
+        await expect(menu).toBeHidden();
+        await newTask.hover();
+        await expect(actions).toHaveCSS("opacity", "1");
+        await newTask.click();
+        await expect(draft).toBeVisible();
+      },
+    );
+
+    appTest("use the selected row's ink on its fill", async ({ page, app }) => {
+      await admitNewTask(page);
+      await page.goto(
+        `${app.origin}/?solo-region-fixture&team-row-channel-group`,
+      );
+      await openPage(page, "Messages");
+      const group = page.locator('[data-team-row-channel-group="alpha"]');
+      const channel = group.getByRole("button", { name: title, exact: true });
+      await channel.click();
+      await expect(group.locator("[data-selected]").first()).toBeAttached();
+      await channel.hover();
+      const colors = await group.evaluate((element) => {
+        const color = (selector) => {
+          const target = element.querySelector(selector);
+          return target ? getComputedStyle(target).color : null;
+        };
+        return {
+          actions: color("[data-channel-row-action]"),
+          disclosure: color("[data-solo-disclosure]"),
+          newTask: color("[data-solo-channel-new-task]"),
+        };
+      });
+      expect(colors.actions).not.toBeNull();
+      expect(colors.disclosure).toBe(colors.actions);
+      expect(colors.newTask).toBe(colors.actions);
+    });
+  });
 
   // Real hit testing catches an accessory covered by the workspace selection
   // target. Text truncation, the trailing swap and focus use browser layout.
@@ -470,8 +711,8 @@ appTest.describe("Solo header accessories", () => {
             (await disclosure.boundingBox())?.x,
           );
           await heading.hover();
-          await expect(metadata).toBeVisible();
-          await expect(nativeMenu.locator("..")).toHaveCSS("opacity", "0");
+          await expect(nativeMenu.locator("..")).toHaveCSS("opacity", "1");
+          await expect(metadata).toBeHidden();
           await page.mouse.move(
             activityBox.x + activityBox.width / 2,
             activityBox.y + activityBox.height / 2,
@@ -491,8 +732,7 @@ appTest.describe("Solo header accessories", () => {
           await expect(heading).not.toHaveAttribute("data-selected");
           await resize.focus();
           await heading.hover();
-          await expect(metadata).toBeVisible();
-          await expect(nativeMenu.locator("..")).toHaveCSS("opacity", "0");
+          await expect(nativeMenu.locator("..")).toHaveCSS("opacity", "1");
 
           await page.mouse.move(0, 0);
           await action.focus();
@@ -563,18 +803,29 @@ appTest.describe("Solo header accessories", () => {
         );
         await expect(time).toHaveCount(1);
         await page.keyboard.press("Escape");
-        await expect(menu).toBeHidden();
+        await expect(menu).toHaveCount(0);
       }
-      await headers[0].group
-        .getByRole("button", { name: "Actions for Work" })
-        .press("Enter");
+      const work = headers[0].group;
+      const workActions = work.getByRole("button", {
+        name: "Actions for Work",
+      });
+      const workTitle = work.getByRole("button", { name: "Work", exact: true });
+      await workTitle.hover();
+      await workActions.click();
+      const workMenu = page.getByRole("menu", { name: "Actions for Work" });
+      const newTask = workMenu.getByRole("menuitem", { name: "New task" });
+      await expect(newTask).toBeVisible();
       await expect(
-        page.getByRole("menuitem", { name: "New task" }),
+        workMenu.getByRole("menuitem", { name: "New chat" }),
       ).toBeVisible();
-      await expect(
-        page.getByRole("menuitem", { name: "New chat" }),
-      ).toBeVisible();
-      await page.keyboard.press("Escape");
+      // Start Escape inside the menu. A pointer click can leave focus outside it.
+      await newTask.focus();
+      await expect(newTask).toBeFocused();
+      await newTask.press("Escape");
+      await expect(workMenu).toHaveCount(0);
+      await expect(workTitle).toBeFocused();
+      await sidebar.getByRole("button", { name: "Other", exact: true }).hover();
+      await expect(workActions.locator("..")).toHaveCSS("opacity", "0");
       const channelGroup = headers[1].group;
       await page.evaluate(() => {
         document.documentElement.style.fontSize = "24px";
@@ -598,17 +849,23 @@ appTest.describe("Solo header accessories", () => {
         )
         .toBe(true);
       await resize.press("ArrowRight");
-      await page.evaluate(() => {
-        document.documentElement.style.fontSize = "32px";
-      });
       for (const { group, title, accessory, activity } of headers) {
+        const pencil = group.getByRole("button", {
+          name: `New task in ${title}`,
+        });
+        await page.evaluate(() => {
+          document.documentElement.style.fontSize = "16px";
+        });
+        await pencil.focus();
+        await page.evaluate(() => {
+          document.documentElement.style.fontSize = "32px";
+        });
+        await expect(pencil).toBeFocused();
+        await resize.focus();
+        await expect(pencil).toBeHidden();
         const label = group.getByText(title, { exact: true });
-        await label.hover();
-        await expect
-          .poll(() =>
-            label.evaluate((item) => item.clientWidth >= item.scrollWidth),
-          )
-          .toBe(true);
+        const titleBox = await label.boundingBox();
+        expect(titleBox.width, title).toBeGreaterThan(0);
         const signal = await group
           .getByRole("button", { name: accessory })
           .boundingBox();
@@ -618,22 +875,70 @@ appTest.describe("Solo header accessories", () => {
         expect(
           Math.abs(signal.y + signal.height / 2 - time.y - time.height / 2),
         ).toBeLessThan(1);
-        const pencil = group.getByRole("button", {
-          name: `New task in ${title}`,
-        });
-        await pencil.focus();
         await page.evaluate(() =>
           window.fixtureSoloRegion.showHeaderMetadata(false),
         );
         await expect(group.getByText(activity, { exact: true })).toHaveCount(0);
-        await expect(pencil).toBeFocused();
-        await resize.focus();
         await expect(pencil).toBeHidden();
         await page.evaluate(() =>
           window.fixtureSoloRegion.showHeaderMetadata(true),
         );
         await expect(group.getByText(activity, { exact: true })).toHaveCount(1);
       }
+    },
+  );
+
+  appTest(
+    "keeps a channel menu hint hoverable and uses the action label for typeahead",
+    async ({ page, app, browserName }) => {
+      await page.clock.install();
+      await page.goto(
+        `${app.origin}/?solo-region-fixture&compose-workspaces&channel-menu-action`,
+      );
+      await openPage(page, "Messages");
+      const trigger = page
+        .locator('[data-solo-channel-group="alpha"]')
+        .getByRole("button", { name: "Actions for Alpha" });
+      const menu = page.getByRole("menu", { name: "Actions for Alpha" });
+      const action = menu.getByRole("menuitem", { name: "Inspect catalog" });
+      const hint = page.getByRole("tooltip", {
+        name: "Inspect the catalog for this channel",
+      });
+
+      await trigger.press("Enter");
+      await action.hover();
+      if (browserName === "webkit") {
+        // Playwright WebKit omits the delta Base UI uses for real movement.
+        await action.dispatchEvent("pointermove", {
+          movementX: 1,
+          pointerType: "mouse",
+        });
+        await action.dispatchEvent("mousemove", { movementX: 1 });
+      }
+      await expect(action).toBeFocused();
+      await expect(action).toHaveAccessibleDescription(
+        "Inspect the catalog for this channel",
+      );
+      await hint.hover();
+      // Let the focus reset and its deferred blur handler finish.
+      await page.clock.runFor(500);
+      await expect(action).toHaveAccessibleDescription(
+        "Inspect the catalog for this channel",
+      );
+      await page.mouse.move(0, 0);
+      await expect(hint).toBeHidden();
+      await expect(menu).toBeVisible();
+
+      await menu
+        .getByRole("menuitem", { name: "View channel details" })
+        .focus();
+      await page.keyboard.press("i");
+      await expect(action).toBeFocused();
+      await expect(hint).toBeVisible();
+      await page.keyboard.press("Escape");
+      await expect(menu).toBeHidden();
+      await expect(hint).toBeHidden();
+      await expect(trigger).toBeFocused();
     },
   );
 
@@ -650,11 +955,10 @@ appTest.describe("Solo header accessories", () => {
       const actions = workspace.getByRole("button", {
         name: "Actions for Work",
       });
-      const timing = await time.boundingBox();
-      await page.mouse.move(
-        timing.x + timing.width / 2,
-        timing.y + timing.height / 2,
-      );
+      await workspace
+        .getByRole("button", { name: "Work", exact: true })
+        .hover();
+      await expect(actions.locator("..")).toHaveCSS("opacity", "1");
       await actions.click();
       await page
         .getByRole("menuitem", { name: "New channel", exact: true })
@@ -686,13 +990,21 @@ appTest.describe("Solo header accessories", () => {
       if (hasTouch) {
         // A real tap detects an always-visible action stealing the accessory's hit target.
         appTest(
-          "keeps accessories and Actions tappable beside header activity",
+          "keeps narrow touch headings on one line with New task in Actions",
           async ({ page, app }) => {
             await admitNewTask(page);
             await page.goto(
               `${app.origin}/?solo-region-fixture&compose-workspaces&workspace-hit-targets&header-accessories`,
             );
             await openPage(page, "Messages");
+            const resize = page.getByRole("separator", {
+              name: "Resize sidebar",
+            });
+            await resize.dblclick();
+            await expect(resize).toHaveAttribute("aria-valuenow", "260");
+            await page.evaluate(() => {
+              document.documentElement.style.fontSize = "20px";
+            });
             for (const [selector, title, accessory] of [
               ['[data-solo-workspace="work"]', "Work", "Mark Work workspace"],
               [
@@ -703,9 +1015,6 @@ appTest.describe("Solo header accessories", () => {
             ]) {
               const group = page.locator(selector);
               const mark = group.getByRole("button", { name: accessory });
-              await expect(
-                group.getByRole("button", { name: `New task in ${title}` }),
-              ).toBeVisible();
               await mark.scrollIntoViewIfNeeded();
               const box = await mark.boundingBox();
               await page.touchscreen.tap(
@@ -717,11 +1026,25 @@ appTest.describe("Solo header accessories", () => {
                 name: `Actions for ${title}`,
               });
               const actionsBox = await actions.boundingBox();
+              const titleBox = await group
+                .getByRole("button", { name: title, exact: true })
+                .boundingBox();
+              const actionCenter = actionsBox.y + actionsBox.height / 2;
+              expect(actionCenter, title).toBeGreaterThan(titleBox.y);
+              expect(actionCenter, title).toBeLessThan(
+                titleBox.y + titleBox.height,
+              );
+              await expect(
+                group.getByRole("button", { name: `New task in ${title}` }),
+              ).toBeHidden();
               await page.touchscreen.tap(
                 actionsBox.x + actionsBox.width / 2,
-                actionsBox.y + actionsBox.height / 2,
+                actionCenter,
               );
               await expect(actions).toHaveAttribute("aria-expanded", "true");
+              await expect(
+                page.getByRole("menuitem", { name: "New task" }),
+              ).toBeVisible();
               await page.keyboard.press("Escape");
             }
           },
@@ -729,11 +1052,11 @@ appTest.describe("Solo header accessories", () => {
       }
 
       appTest(
-        "keeps both actions clear of long metadata-only titles",
+        "keeps actions and accessories clear of long titles",
         async ({ page, app }) => {
           await admitNewTask(page);
           await page.goto(
-            `${app.origin}/?solo-region-fixture&compose-workspaces&workspace-hit-targets&header-accessories&leading-header`,
+            `${app.origin}/?solo-region-fixture&compose-workspaces&workspace-hit-targets&header-accessories&leading-header&channel-header-accessory`,
           );
           await openPage(page, "Messages");
           const resize = page.getByRole("separator", {
@@ -774,10 +1097,26 @@ appTest.describe("Solo header accessories", () => {
             await expect(time).toBeHidden();
             await expect(actions.locator("..")).toHaveCSS("opacity", "1");
             expect(await label.boundingBox()).toEqual(rest);
-            const button = await pencil.boundingBox();
-            expect
-              .soft(rest.x + rest.width, title)
-              .toBeLessThanOrEqual(button.x);
+            if (hasTouch) await expect(pencil).toBeHidden();
+            else await expect(pencil).toBeVisible();
+            const intersectsTitle = await label.evaluate((element) => {
+              const label = element.getBoundingClientRect();
+              const row = element.closest(".navigation-section-heading");
+              return [
+                ...row.querySelectorAll(
+                  ".navigation-section-heading-trailing button",
+                ),
+              ].some((button) => {
+                const control = button.getBoundingClientRect();
+                return (
+                  control.x < label.right &&
+                  control.right > label.x &&
+                  control.y < label.bottom &&
+                  control.bottom > label.y
+                );
+              });
+            });
+            expect(intersectsTitle, title).toBe(false);
           }
         },
       );

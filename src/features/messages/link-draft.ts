@@ -2,6 +2,7 @@ import type { PageNavigation } from "../navigation/service";
 import { relayPartition } from "../relay/partition";
 import { readView, viewRevision, writeView } from "../../shared/view-state";
 import { hasDraftContent, mentionDraft } from "./mention-draft";
+import { threadDraftKey } from "./reply-target";
 
 /** Visit position key: this visit already applied its link draft. */
 const SEEDED = "link-draft-seeded";
@@ -30,7 +31,7 @@ export function applyLinkDraft(
   )
     return;
   if (!navigation.position(SEEDED)) {
-    const key = `draft:${channelId}:thread:${rootId}`;
+    const key = threadDraftKey(channelId, rootId);
     // Unreadable storage could hide a saved draft; leave it alone. A failed
     // save keeps the draft in the address, so the next open tries again.
     if (

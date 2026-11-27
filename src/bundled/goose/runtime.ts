@@ -45,6 +45,7 @@ import {
   type TurnResult,
 } from "../../features/agents/service";
 import { compactAt } from "../../features/agents/compact-at";
+import { launchModel } from "../../features/agents/model-routes";
 import { workflowOf } from "../../features/agents/owner-attestation";
 import {
   agentFolders,
@@ -53,8 +54,15 @@ import {
   startingFolder,
 } from "../../features/agents/conversation-folders";
 import {
+  ownerLabel,
+  ownerRows,
+  ownerTurns,
+} from "../../features/agents/owner-view";
+import type { TranscriptTurn } from "../../features/agents/activity-transcript";
+import {
   ownerReads,
   readyOwnerReads,
+  type AgentReads,
   workflowMarked,
 } from "../../features/agents/reads";
 import {
@@ -80,10 +88,7 @@ import type { Host } from "../../features/host/service";
 import type { EventData } from "../../features/relay/events";
 import type { RelayData } from "../../features/relay/service";
 import { threadReference } from "../../features/relay/thread-reference";
-import {
-  wakeAnchor,
-  wakeLands,
-} from "../../features/agent-harness/plugin-wake";
+import { turnChannel, turnOf } from "../../features/agent-harness/plugin-wake";
 import {
   CONTEXT_LIMIT,
   type Scope,
@@ -92,11 +97,11 @@ import {
 } from "../claude-code/prompt";
 import { readAuthorNames } from "../../features/agent-harness/author-names";
 import {
-  ownerCanvas,
   project,
   readCanvas,
   worksElsewhere,
 } from "../../features/agent-harness/project";
+import { referencedSkills } from "../../features/agent-harness/referenced-folders";
 import type { Exclusive } from "../../features/agent-harness/acp/agent-sessions";
 import {
   placeOf,
@@ -121,13 +126,14 @@ import {
 } from "../../features/agents/gateway/route";
 import {
   type ActivityReceipt,
+  type Choice,
   GooseProcess,
   REQUEST_TIMEOUT_MS,
   type ServeMcp,
   type Settled,
   type ToolServer,
 } from "./goose";
-import { forwardedTurn, GATEWAY_PROVIDER } from "./forwarded";
+import { forwardedTurn, type GatewayProvider } from "./forwarded";
 import { marked, sessionTags, unforged } from "./transcript";
 import {
   absolute,
@@ -294,9 +300,18 @@ export class GooseRuntime {
     private readonly defaultProvider: () => Promise<
       string | undefined
     > = async () => undefined,
+    private readonly conversationReads?: (
+      key: AgentKey,
+    ) => AgentReads | undefined,
   ) {
     // Once found, agents on Recommended take it up.
     this.unfollow = recommended?.subscribe(() => this.sync(this.synced));
+  }
+  private reads(key: AgentKey) {
+    return (
+      this.conversationReads?.(key) ??
+      ownerReads(this.relay(key), pubkeyOf(key))
+    );
   }
   private readonly unfollow: (() => void) | undefined;
   private synced: readonly Agent[] = [];
@@ -521,9 +536,22 @@ export class GooseRuntime {
   }
   /** The community's current name and kind for a channel, if it lists it. */
   channelLabel(agent: AgentKey, channelId: string) {
-    return ownerReads(this.relay(agent), pubkeyOf(agent))?.channelLabel(
-      channelId,
-    );
+    return ownerLabel(this.reads(agent), channelId);
+  }
+  /** The conversations among `rows` its owner can read. */
+  readableRows<T extends Readonly<{ channelId: string; community?: true }>>(
+    agent: AgentKey,
+    rows: readonly T[],
+  ) {
+    return ownerRows(rows, this.reads(agent));
+  }
+  /** The turns of `place` its owner can read. */
+  readableTurns<T extends TranscriptTurn>(
+    agent: AgentKey,
+    place: Readonly<{ channelId: string; community?: true }>,
+    turns: readonly T[],
+  ) {
+    return ownerTurns(turns, this.reads(agent), place);
   }
   subscribe(listener: () => void) {
     this.listeners.add(listener);
@@ -573,17 +601,16 @@ export class GooseRuntime {
       // A saved session a forwarded turn left compacts through the gateway
       // too, under the control's own context, or fails visibly; one whose
       // agent's provider the gateway doesn't serve compacts as any other.
-      const through =
-        action === "compact" &&
-        key !== COMMUNITY_SESSION &&
-        !!this.forwarding &&
-        (await this.forwards(entry, agent));
-      if (through) signal.throwIfAborted();
+      const settings =
+        action === "compact" && key !== COMMUNITY_SESSION && this.forwarding
+          ? await this.forwardingSettings(entry, agent)
+          : undefined;
+      if (settings) signal.throwIfAborted();
       const result = await entry.sessions.reset(
         key,
         action,
-        through
-          ? (held) => this.compact(entry, agent, place, held, signal)
+        settings
+          ? (held) => this.compact(entry, agent, place, held, signal, settings)
           : undefined,
       );
       signal.throwIfAborted();
@@ -619,6 +646,7 @@ export class GooseRuntime {
       team,
       model,
       effort,
+      route: chooseModel,
       synced,
       workingUntil,
       current,
@@ -656,8 +684,10 @@ export class GooseRuntime {
             agent,
             signal,
             channelId ?? trigger.event.tags.find((tag) => tag[0] === "h")?.[1],
+            undefined,
+            () => this.reads(agent.key),
           )
-        : ownerReads(this.relay(agent.key), agent.pubkey);
+        : this.reads(agent.key);
       if (ready) {
         signal.throwIfAborted();
         if (current && !current()) return ignored?.();
@@ -687,10 +717,7 @@ export class GooseRuntime {
       entry.handle = agent;
       entry.team = team ?? "";
     }
-    const event =
-      trigger.type !== "mention" ? wakeAnchor(trigger) : trigger.event;
-    const channel =
-      channelId ?? event.tags.find((tag) => tag[0] === "h")?.[1] ?? undefined;
+    const channel = turnChannel(trigger, delivery);
     if (!channel) return;
     // Where it answers needs the channel's kind, which a reconnecting
     // community, or one still listing its channels, does not know yet: it
@@ -702,6 +729,7 @@ export class GooseRuntime {
       signal,
       channel,
       "This turn",
+      () => this.reads(agent.key),
     );
     signal.throwIfAborted();
     if (current && !current()) return ignored?.();
@@ -712,8 +740,10 @@ export class GooseRuntime {
       channel,
       signal,
     );
-    const topLevel = solo || wake?.topLevel === true;
-    if (wake && !wakeLands(wake, topLevel)) return ignored?.();
+    // Where the host placed it; this harness has no rules of its own.
+    const turn = turnOf(trigger, delivery, channel, solo);
+    if (!turn) return ignored?.();
+    const { event, topLevel } = turn;
     const gateway = offered && (await this.routed(entry, offered));
     if (offered && !admittedDeferred) signal.throwIfAborted();
     // A wake run without the gateway says so beside its prompt in Activity:
@@ -879,13 +909,20 @@ export class GooseRuntime {
           ...(model ? { model } : {}),
           ...(effort ? { effort } : {}),
           // A pick runs on its own level; a synced one is checked.
-          ...(synced?.effort && !model && !effort
+          ...(synced?.effort && !model && !effort && !chooseModel
             ? { kept: synced.effort }
             : {}),
         };
         if (gateway) {
+          // A forwarded turn always starts one: its route chooses now.
+          const chosen = chooseModel ? await chooseModel() : {};
+          if (!chosen) {
+            delivered = Promise.resolve({ ok: true, undelivered: true });
+            return;
+          }
           delivered = this.forwarded(entry, agent.key, key, gateway, {
             ...options,
+            ...chosen,
             activity: { ...activity, current: valid },
             prompt: async (fresh) => {
               if (!valid()) return undefined;
@@ -909,6 +946,7 @@ export class GooseRuntime {
         }
         delivered = entry.sessions.deliver(key, text, shown, {
           ...options,
+          ...(chooseModel ? { route: chooseModel } : {}),
           ...activity,
           ...(wake ? { current } : {}),
           // Built again as it is handed over: a wake, to read what is
@@ -1035,7 +1073,7 @@ export class GooseRuntime {
       );
     const { agent, team } = delivery;
     await this.follow(delivery.config);
-    const entry = this.entry(agent.key, settings);
+    const entry = this.entry(agent.key, this.settings(delivery.config));
     if (settings.scope !== "community" && !reserved)
       return standaloneTurn(
         entry.policies,
@@ -1165,24 +1203,30 @@ export class GooseRuntime {
     return done.finally(() => this.notify());
   }
 
-  /** Whether the agent's turns can go through the gateway: on the provider
-   * it names, else goose's default, the gateway's. One whose default can't
-   * be read runs as it would without the gateway, as does a protected
-   * agent: a forwarded turn spawns outside its containment and policy. */
-  private async forwards(entry: Entry, agent?: Pick<Agent, "protection">) {
+  /** Resolve the provider for the gateway and delegates. Protected agents
+   * keep their own containment and policy. */
+  private async forwardingSettings(
+    entry: Entry,
+    agent?: Pick<Agent, "protection">,
+  ): Promise<ForwardingSettings | undefined> {
     if (entry.protected || entry.handle?.protection || agent?.protection)
-      return false;
-    const named = entry.config.provider.trim();
+      return undefined;
+    const choice = this.choice(entry);
     const provider =
-      named || (await this.defaultProvider().catch(() => undefined));
-    return provider === GATEWAY_PROVIDER;
+      choice.provider || (await this.defaultProvider().catch(() => undefined));
+    if (provider === "databricks" || provider === "databricks_v2")
+      return { provider, choice };
   }
 
   /** The dispatched route a turn runs through, or none: a turn on another
    * provider, or a protected agent's, runs as it would without the
    * gateway, its settings untouched. */
-  private async routed(entry: Entry, gateway: Gateway) {
-    return (await this.forwards(entry)) ? gateway : undefined;
+  private async routed(
+    entry: Entry,
+    gateway: Gateway,
+  ): Promise<ForwardRoute | undefined> {
+    const settings = await this.forwardingSettings(entry);
+    return settings ? { ...gateway, settings } : undefined;
   }
 
   /** A conversation's turn through the gateway, holding the conversation:
@@ -1191,7 +1235,7 @@ export class GooseRuntime {
     entry: Entry,
     agent: AgentKey,
     key: string,
-    gateway: Gateway,
+    gateway: ForwardRoute,
     turn: ForwardTurn,
   ): Promise<Settled> {
     // The delivery's deadline ends only its wait for the conversation, as
@@ -1221,6 +1265,7 @@ export class GooseRuntime {
     place: SessionPlace,
     held: Exclusive,
     signal: AbortSignal,
+    settings: ForwardingSettings,
   ): Promise<Settled> {
     const route = this.forwarding?.control(agent.key);
     if (route?.kind === "blocked")
@@ -1240,7 +1285,7 @@ export class GooseRuntime {
       entry,
       agent.key,
       key,
-      { route, turn },
+      { route, turn, settings },
       { prompt: async () => ({ text: "/compact" }), signal },
       held,
     );
@@ -1266,7 +1311,7 @@ export class GooseRuntime {
     entry: Entry,
     agent: AgentKey,
     key: string,
-    gateway: Gateway,
+    gateway: ForwardRoute,
     turn: ForwardTurn,
     held?: Exclusive,
   ): Promise<Settled> {
@@ -1296,7 +1341,12 @@ export class GooseRuntime {
     }
     if (!bound.ok) return refused(bound.message);
     const { binding } = bound;
-    const { route } = gateway;
+    const { route, settings } = gateway;
+    // Model and effort edits can take effect as queued turns start. Keep the
+    // routed choice if the agent has since moved to a different provider.
+    const current = this.choice(entry);
+    const choice =
+      current.provider === settings.choice.provider ? current : settings.choice;
     const { desktop } = this;
     const workspace = () =>
       absolute(desktop.resolveDirectory, entry.config.workspace);
@@ -1339,9 +1389,11 @@ export class GooseRuntime {
             // Its Buzz tools' server counts in the pool sessions share.
             serve: entry.sessions.pooled((handler) => this.serve(handler)),
             onProcess,
-            // Acts as the agent, as its ordinary goose does.
+            // Acts as the agent, with its variables, as its ordinary goose
+            // does.
             ...(entry.handle && {
               agent: { pubkey: entry.handle.pubkey, relay: entry.handle.relay },
+              secrets: ["agent-env"],
             }),
           }),
         launch: async () => {
@@ -1358,7 +1410,8 @@ export class GooseRuntime {
           };
         },
         tools: entry.tools,
-        choice: () => this.choice(entry),
+        provider: settings.provider,
+        choice: () => choice,
         conversation: key,
         tags: sessionTags(agent, held ? key : undefined),
         ...(turn.title ? { title: turn.title } : {}),
@@ -1522,12 +1575,9 @@ export class GooseRuntime {
     admitted?: string,
     current = () => true,
   ) {
-    const snapshot = this.relay(agent.key)?.snapshot();
-    const session = snapshot?.status === "ready" ? snapshot.session : undefined;
-    const summary =
-      session?.channels.list().channels.find((item) => item.id === channelId) ??
-      session?.channels.get?.(channelId);
-    const dm = summary?.channelType === "dm";
+    const reads = this.reads(agent.key);
+    const summary = await reads?.channel(channelId);
+    const dm = summary?.dm === true;
     const thread = threadReference(event);
     const rootId = thread?.rootId ?? event.id;
     // A Solo chat is one conversation, as a DM is.
@@ -1551,18 +1601,13 @@ export class GooseRuntime {
     const owner = entry.handle?.owner;
     // Keyed as its session launches: a community session has no folder of
     // its own, whatever folder the chat kept.
-    const folder = session ? this.folder(agent.key, key) : undefined;
+    const folder = reads ? this.folder(agent.key, key) : undefined;
     const chosen = this.installed(entry, channelId, key);
+    const ownerCanvas = reads?.canvas;
     const reading = solo
       ? readCanvas(
-          session && owner
-            ? () =>
-                ownerCanvas(
-                  session.canvas,
-                  owner,
-                  channelId,
-                  session.channelWrites.startingCanvas(channelId),
-                )
+          ownerCanvas && owner
+            ? () => ownerCanvas(channelId, owner)
             : undefined,
         ).then(
           (read) => read && project(read.text, worksElsewhere(folder, chosen)),
@@ -1570,16 +1615,16 @@ export class GooseRuntime {
       : Promise.resolve(undefined);
     const threadRead = (thread || (resumed && !dm)) && !topLevel;
     let earlier: readonly EventData[] = [];
-    if (session && (thread || dm || topLevel || resumed))
+    if (reads && (thread || dm || topLevel || resumed))
       try {
-        const events = await session.read(
+        const events = await reads.read(
           threadRead
             ? [
                 { ids: [rootId], "#h": [channelId], limit: 1 },
                 { kinds: CHAT, "#h": [channelId], "#e": [rootId], limit: 200 },
               ]
             : [{ kinds: CHAT, "#h": [channelId], limit: CONTEXT_LIMIT + 1 }],
-          { signal: AbortSignal.timeout(CONVERSATION_READ_TIMEOUT_MS) },
+          AbortSignal.timeout(CONVERSATION_READ_TIMEOUT_MS),
         );
         earlier = events
           .filter(
@@ -1600,7 +1645,6 @@ export class GooseRuntime {
       (item) =>
         item.created_at > seen && (!seen || item.pubkey !== agent.pubkey),
     );
-    const reads = ownerReads(this.relay(agent.key), agent.pubkey);
     const signingAuthority = reads?.workflowAuthority();
     const [names, canvas] = await Promise.all([
       readAuthorNames(
@@ -1615,6 +1659,12 @@ export class GooseRuntime {
       scope === "community" && admitted && current()
         ? entry.project.preview(channelId, solo ? loadedProject : NO_PROJECT)
         : loadedProject;
+    const projectContext = [
+      turnProject?.section,
+      referencedSkills(event, owner, agent.pubkey),
+    ]
+      .filter(Boolean)
+      .join("\n\n");
     return {
       key,
       event,
@@ -1639,7 +1689,7 @@ export class GooseRuntime {
       total: earlier.length + 1,
       ...(signingAuthority ? { signingAuthority } : {}),
       names,
-      ...(turnProject ? { project: turnProject.section } : {}),
+      ...(projectContext ? { project: projectContext } : {}),
       ...(scope === "community" && turnProject
         ? { acceptProject: () => entry.project.resolve(channelId, turnProject) }
         : {}),
@@ -1688,7 +1738,12 @@ export class GooseRuntime {
     };
     // Every session of the agent shares them, so they read the settings, the
     // handle and the conversation's place as they are when called.
-    const tools: ToolServer = async (conversation, message, workSignal) => {
+    const tools: ToolServer = async (
+      conversation,
+      message,
+      workSignal,
+      contextTokens,
+    ) => {
       const handle = entry.handle;
       // A call in a conversation answers only while its turn runs unstopped.
       // A forwarded turn's session runs in its own goose, outside `sessions`;
@@ -1711,6 +1766,8 @@ export class GooseRuntime {
               if (!current()) throw new Error("The Goose turn has ended");
             },
           }),
+          // Each message it posts carries its session's context size.
+          contextTokens: () => contextTokens,
           // Its pre-tool check reviews every call, Buzz's extension included.
           nativeToolGate: true,
           // Read from the process hosting the session, which it never starts.
@@ -1835,7 +1892,8 @@ export class GooseRuntime {
   private choice(entry: Entry) {
     return {
       provider: entry.config.provider.trim(),
-      model: entry.config.model.trim(),
+      // A saved model route picks per turn; the process starts on the default.
+      model: launchModel(entry.config.model.trim()),
       effort: entry.config.effort,
     };
   }
@@ -1879,7 +1937,7 @@ export class GooseRuntime {
    * needed. */
   private memories(agent: AgentKey, slug?: string) {
     const pubkey = pubkeyOf(agent);
-    const reads = ownerReads(this.relay(agent), pubkey);
+    const reads = this.reads(agent);
     if (!reads) return Promise.reject(new Error("Buzz is not connected"));
     return this.memoryReads.read(
       reads,
@@ -1890,12 +1948,17 @@ export class GooseRuntime {
   }
   private forget(agent: AgentKey) {
     const pubkey = pubkeyOf(agent);
-    const reads = ownerReads(this.relay(agent), pubkey);
+    const reads = this.reads(agent);
     if (reads) this.memoryReads.forget(reads.connection, pubkey);
   }
 }
 
 type Gateway = Readonly<{ route: EligibleRoute; turn: TurnContext }>;
+type ForwardingSettings = Readonly<{
+  provider: GatewayProvider;
+  choice: Choice;
+}>;
+type ForwardRoute = Gateway & Readonly<{ settings: ForwardingSettings }>;
 /** What a forwarded turn runs, past what the gateway and its hold give it. */
 type ForwardTurn = Readonly<{
   /** The turn's text, and the created_at of the newest event it shows. */
